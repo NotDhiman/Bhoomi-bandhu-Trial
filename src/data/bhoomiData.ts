@@ -21,10 +21,13 @@ export interface SchemeItem {
   targetNeeds: string[];
 }
 
+export type ContentAudience = "farmer" | "warehouse_owner" | "both";
+
 export interface InsurancePlan {
   id: string;
   name: string;
   category: string;
+  audience?: ContentAudience;
   summary: string;
   eligibility: string[];
   premiumAndCoverage: string[];
@@ -37,7 +40,15 @@ export interface LoanOption {
   id: string;
   name: string;
   provider: string;
-  loanType: "Crop Loan" | "Equipment Loan" | "Infrastructure Loan" | "Allied Agri Loan";
+  loanType:
+    | "Crop Loan"
+    | "Equipment Loan"
+    | "Infrastructure Loan"
+    | "Allied Agri Loan"
+    | "Warehouse Construction"
+    | "Warehouse Running Capital"
+    | "Land Purchase Loan";
+  audience?: ContentAudience;
   summary: string;
   interestSummary: string;
   eligibility: string[];
@@ -86,6 +97,7 @@ export interface PartnerCompanyItem {
   id: string;
   name: string;
   category: "loan" | "insurance";
+  audience?: ContentAudience;
   interestOrPremium: string;
   coverageOrLimit: string;
   eligibilitySummary: string;
@@ -106,6 +118,13 @@ export interface PsychiatristProfileItem {
   state: string;
   bio: string;
   availableForConsult: boolean;
+  consultMode?:
+    | "Audio & Video"
+    | "Audio Call Only"
+    | "Video Call Only"
+    | "Chat & Audio";
+  sessionDurationMins?: 20 | 30 | 45;
+  preferredSlots?: string[];
 }
 
 export const INDIAN_STATES = [
@@ -119,9 +138,17 @@ export const INDIAN_STATES = [
   "Gujarat",
   "Karnataka",
   "Tamil Nadu",
+  "Telangana",
+  "Andhra Pradesh",
   "Bihar",
   "West Bengal",
-  "Andhra Pradesh",
+  "Odisha",
+  "Kerala",
+  "Assam",
+  "Chhattisgarh",
+  "Jharkhand",
+  "Himachal Pradesh",
+  "Uttarakhand",
 ];
 
 export const SCHEMES_DATA: SchemeItem[] = [
@@ -400,6 +427,7 @@ export const INSURANCE_PLANS: InsurancePlan[] = [
     id: "pmfby-plan",
     name: "Pradhan Mantri Fasal Bima Yojana (PMFBY)",
     category: "Yield-Based Crop Insurance",
+    audience: "farmer",
     summary:
       "India's primary crop insurance shield protecting farmers against natural calamities, pests, and post-harvest losses at ultra-low premiums.",
     eligibility: [
@@ -428,6 +456,7 @@ export const INSURANCE_PLANS: InsurancePlan[] = [
     id: "rwbcis-plan",
     name: "Restructured Weather Based Crop Insurance Scheme (RWBCIS)",
     category: "Weather-Index Insurance",
+    audience: "farmer",
     summary:
       "Uses local weather station measurements (rainfall, temperature, frost, humidity) to trigger faster payouts when adverse weather hits crops.",
     eligibility: [
@@ -452,6 +481,7 @@ export const INSURANCE_PLANS: InsurancePlan[] = [
     id: "cpis-plan",
     name: "Coconut Palm Insurance Scheme (CPIS)",
     category: "Perennial Plantation Insurance",
+    audience: "farmer",
     summary:
       "Protects coconut growers against total loss of palms caused by cyclones, floods, severe drought, and uncontrollable pests.",
     eligibility: [
@@ -471,6 +501,108 @@ export const INSURANCE_PLANS: InsurancePlan[] = [
     ],
     officialUrl: "https://www.coconutboard.gov.in/",
   },
+  {
+    id: "wh-property-fire-plan",
+    name: "Commercial Warehouse Building, Fire & Standard Perils Insurance",
+    category: "Warehouse Building & Running Cover",
+    audience: "warehouse_owner",
+    summary:
+      "Comprehensive commercial property protection for grain godowns, pre-engineered sheds, weighbridges, solar roofs, and office blocks against fire, storm, and flood.",
+    eligibility: [
+      "Registered warehouse owners, partnership firms, cold-storage operators, and WDRA-compliant godowns.",
+      "Applicable for both owned commercial plots and long-term leased industrial storage facilities.",
+    ],
+    premiumAndCoverage: [
+      "Covers building superstructure, RCC flooring, boundary walls, loading docks, and firefighting installations.",
+      "Protects against fire, lightning, explosion, storm, cyclone, flood, inundation, and impact damage.",
+      "Optional add-ons for burglary, debris removal, and rent/revenue loss during repair.",
+    ],
+    documents: [
+      "GST Registration & Business PAN",
+      "Warehouse Property Ownership / Registered Lease Deed",
+      "Fire Safety NOC & Asset Valuation Summary",
+    ],
+    howToApply: [
+      "Share total built-up area (sq. ft.), construction type (RCC/PEB), and asset sum insured with an empaneled commercial insurer.",
+      "Schedule a pre-policy risk inspection for preferred commercial rates on WDRA-compliant godowns.",
+    ],
+    officialUrl: "https://www.newindia.co.in/",
+  },
+  {
+    id: "wh-deterioration-machinery-plan",
+    name: "Cold Storage Machinery Breakdown & Deterioration of Stock (DOS)",
+    category: "Operations & Cold-Chain Cover",
+    audience: "warehouse_owner",
+    summary:
+      "Dual operational shield covering refrigeration compressors, DG backup sets, and stored produce spoilage caused by sudden temperature failure.",
+    eligibility: [
+      "Commercial cold storages, controlled-atmosphere chambers, and multi-commodity agro-warehouses.",
+      "Requires routine maintenance logbooks and calibrated temperature sensors.",
+    ],
+    premiumAndCoverage: [
+      "Reimburses repair or replacement cost of compressors, condensers, chillers, transformers, and electrical panels.",
+      "Covers financial loss of stored commodities if sudden machinery breakdown triggers temperature rise beyond safe thresholds.",
+    ],
+    documents: [
+      "Machinery Asset Schedule & Invoice Values",
+      "Annual Maintenance Contract (AMC) or Service Records",
+      "Cold Chamber Capacity & Stock Register",
+    ],
+    howToApply: [
+      "Submit equipment inventory and peak stock valuation to a commercial general insurer.",
+      "Bundle Machinery Breakdown + DOS in one commercial policy to lower annual premium.",
+    ],
+    officialUrl: "https://www.icicilombard.com/",
+  },
+  {
+    id: "wh-liability-stock-plan",
+    name: "Warehouseman Legal Liability & Stored Inventory Policy",
+    category: "Stored Stock & Liability Cover",
+    audience: "warehouse_owner",
+    summary:
+      "Protects warehouse operators against third-party farmer stock claims, theft, moisture ingress, and e-NWR custodian liability during active operations.",
+    eligibility: [
+      "Private and cooperative warehouse operators issuing storage receipts or e-NWRs to farmers and traders.",
+    ],
+    premiumAndCoverage: [
+      "Covers legal defense and indemnity for accidental loss or damage to third-party agricultural produce in custody.",
+      "Required by most commercial banks before accepting your warehouse receipts for pledge financing.",
+    ],
+    documents: [
+      "WDRA Registration / State Warehouse License",
+      "Standard Storage Agreement & Stock Ledger Sample",
+      "Security & CCTV Compliance Checklist",
+    ],
+    howToApply: [
+      "Estimate maximum peak value of stored commodities across all bays.",
+      "Request a declaration-based Commercial Warehouseman Liability policy with quarterly stock adjustments.",
+    ],
+    officialUrl: "https://wdra.gov.in/",
+  },
+  {
+    id: "wh-land-car-plan",
+    name: "Warehouse Construction All-Risk (CAR) & Commercial Site Cover",
+    category: "Construction & Land Cover",
+    audience: "warehouse_owner",
+    summary:
+      "Dedicated project insurance for newly purchased commercial warehouse land during civil foundation work, steel erection, silo fabrication, and commissioning.",
+    eligibility: [
+      "Warehouse developers, logistics firms, and owners expanding bays or constructing on newly acquired commercial land.",
+    ],
+    premiumAndCoverage: [
+      "Covers civil structure under construction, steel trusses, roofing sheets, and site materials against collapse, storm, or theft.",
+      "Includes third-party bodily injury / property liability on the construction plot until handover.",
+    ],
+    documents: [
+      "Approved Building Plan & Sanctioned Construction Estimate",
+      "Land Purchase Sale Deed / Industrial Plot Allotment Letter",
+      "EPC / Civil Contractor Agreement",
+    ],
+    howToApply: [
+      "Obtain CAR cover before breaking ground or ordering structural steel to satisfy bank project-loan disbursement conditions.",
+    ],
+    officialUrl: "https://www.unitedindia.co.in/",
+  },
 ];
 
 export const LOANS_DATA: LoanOption[] = [
@@ -479,6 +611,7 @@ export const LOANS_DATA: LoanOption[] = [
     name: "Kisan Credit Card (KCC) Crop Loan",
     provider: "Public Sector, RRB & Cooperative Banks",
     loanType: "Crop Loan",
+    audience: "farmer",
     summary:
       "Short-term revolving credit for seasonal cultivation expenses, seeds, fertilizers, and minor equipment repairs.",
     interestSummary: "7% p.a. base rate; effective 4% p.a. with 3% timely repayment subsidy (up to Rs. 3 Lakh).",
@@ -505,11 +638,12 @@ export const LOANS_DATA: LoanOption[] = [
     name: "Agriculture Infrastructure Fund (AIF)",
     provider: "Scheduled Commercial Banks & NABARD",
     loanType: "Infrastructure Loan",
+    audience: "both",
     summary:
       "Medium-to-long-term financing for building warehouses, cold storages, sorting/grading units, and primary processing centers.",
     interestSummary: "3% interest subvention on loans up to Rs. 2 Crore (capped at max 9% lender rate) for up to 7 years.",
     eligibility: [
-      "Farmers, FPOs, PACS, agri-entrepreneurs, and warehouse operators building post-harvest storage or processing infrastructure.",
+      "Warehouse owners, agri-entrepreneurs, FPOs, PACS, and farmers building post-harvest storage or processing infrastructure.",
     ],
     repaymentTerms: [
       "Up to 7 years repayment with an initial moratorium period of 6 months to 2 years.",
@@ -526,10 +660,93 @@ export const LOANS_DATA: LoanOption[] = [
     officialUrl: "https://agriinfra.dac.gov.in/",
   },
   {
+    id: "wh-construction-loan",
+    name: "Warehouse & Cold Storage Construction Term Loan",
+    provider: "NABARD AMI / SIDBI & Commercial Banks",
+    loanType: "Warehouse Construction",
+    audience: "warehouse_owner",
+    summary:
+      "Long-term commercial project finance for constructing scientific grain godowns, pre-engineered steel sheds, silos, and multi-chamber cold storages.",
+    interestSummary: "8.75% – 10.25% p.a. commercial term rates (eligible for 3% AIF interest subvention & AMI capital subsidy).",
+    eligibility: [
+      "Individual warehouse proprietors, LLPs, private limited firms, and partnerships with clear non-agricultural / commercial land title.",
+      "Minimum 15% – 25% promoter margin contribution toward civil & structural cost.",
+    ],
+    repaymentTerms: [
+      "7 to 12 years repayment tenure aligned with storage rental cashflows.",
+      "Includes 12 to 24 months construction moratorium before principal EMI starts.",
+    ],
+    documents: [
+      "Detailed Project Report (DPR) with Civil Architect Estimate",
+      "CLU (Change of Land Use) / Industrial Plot Approval",
+      "Last 2–3 Years ITRs, GST Returns & Bank Statements",
+    ],
+    howToApply: [
+      "Prepare a bankable DPR showing MT capacity, bay layout, and projected rental revenue.",
+      "Apply through a scheduled commercial bank SME/Agri-Infra desk or link via agriinfra.dac.gov.in.",
+    ],
+    officialUrl: "https://agriinfra.dac.gov.in/",
+  },
+  {
+    id: "wh-running-capital-loan",
+    name: "Warehouse Operations & Working Capital Overdraft",
+    provider: "SBI / HDFC / Axis Commercial Agri-Business Desks",
+    loanType: "Warehouse Running Capital",
+    audience: "warehouse_owner",
+    summary:
+      "Revolving cash-credit and equipment upgrade line to fund day-to-day warehouse running expenses, power bills, solar backup, weighbridges, and staffing.",
+    interestSummary: "9.25% – 11.20% p.a. floating overdraft; interest charged only on daily utilized balance.",
+    eligibility: [
+      "Operational grain warehouses and cold storages with at least 12 months of active rental billing or storage receipts.",
+      "Clean GST & credit track record.",
+    ],
+    repaymentTerms: [
+      "Annual renewable Cash Credit (CC) / Overdraft limit for running expenses + 3–5 year term add-on for solar/HVAC upgrades.",
+      "Flexible drawdowns to bridge seasonal off-peak occupancy months.",
+    ],
+    documents: [
+      "GST Filing History & Warehouse Occupancy Ledger",
+      "Last 12 Months Current Account Bank Statements",
+      "Existing Property Valuation & WDRA Certificate (if applicable)",
+    ],
+    howToApply: [
+      "Submit your annual operating cashflow summary at your commercial bank's SME or Supply-Chain Finance branch.",
+    ],
+    officialUrl: "https://www.sidbi.in/",
+  },
+  {
+    id: "wh-land-purchase-loan",
+    name: "Commercial Storage Land Acquisition & Site Development Loan",
+    provider: "Scheduled Commercial Banks & NBFC Infra Desks",
+    loanType: "Land Purchase Loan",
+    audience: "warehouse_owner",
+    summary:
+      "Commercial mortgage financing for acquiring industrial, highway-corridor, or mandi-adjacent plots specifically for building or expanding warehouse capacity.",
+    interestSummary: "9.5% – 11.75% p.a. against clear land title + site development plan (up to 65% – 70% LTV).",
+    eligibility: [
+      "Existing warehouse operators expanding capacity or commercial logistics entrepreneurs acquiring zoned storage plots.",
+      "Plot must have verified road access, non-disputed title chain, and permissible commercial/agri-infra zoning.",
+    ],
+    repaymentTerms: [
+      "Up to 10 years commercial mortgage tenure.",
+      "Can be structured as a composite loan: Land Acquisition tranche + Construction disbursement tranche.",
+    ],
+    documents: [
+      "Sale Agreement / Allotment Letter & 30-Year Title Search Report",
+      "Zoning / CLU Certificate Permitting Godown Construction",
+      "Promoter KYC, Net-Worth Statement & Financial Projections",
+    ],
+    howToApply: [
+      "Obtain legal title clearance and land valuation from a bank-empaneled valuer before signing final sale registration.",
+    ],
+    officialUrl: "https://www.jansamarth.in/",
+  },
+  {
     id: "farm-mechanization-loan",
     name: "Tractor & Farm Mechanization Loan",
     provider: "SBI / NABARD Partner Banks",
     loanType: "Equipment Loan",
+    audience: "farmer",
     summary:
       "Term loan to buy tractors, rotavators, harvesters, and power tillers with repayment schedules matched to harvest seasons.",
     interestSummary: "Typically 8.9% – 11.5% p.a. depending on bank, down payment, and state SMAM subsidy.",
@@ -555,6 +772,7 @@ export const LOANS_DATA: LoanOption[] = [
     name: "Dairy, Poultry & Allied Farming Loan",
     provider: "NABARD / Regional Rural Banks",
     loanType: "Allied Agri Loan",
+    audience: "farmer",
     summary:
       "Working capital and term credit for purchasing milch cattle, building sheds, poultry units, or beekeeping setups.",
     interestSummary: "KCC-linked working capital at 4% effective rate (up to Rs. 2 Lakh); term loans at bank MCLR-linked rates.",
@@ -665,6 +883,60 @@ export const SEEDED_WAREHOUSES: WarehouseItem[] = [
     status: "active",
     mapX: 46,
     mapY: 79,
+    isCatalog: true,
+  },
+  {
+    id: "wh-jalandhar-doaba",
+    ownerId: "catalog-owner-6",
+    name: "Doaba Cold & Wheat Hub",
+    cityState: "Jalandhar, Punjab",
+    distanceKm: 12.1,
+    totalCapacityMt: 2100,
+    availableCapacityMt: 740,
+    pricePerQuintalMonth: 20,
+    rating: 4.7,
+    facilities: ["Cold Storage", "Moisture Control", "Digital Weighbridge", "24x7 Security"],
+    description:
+      "Potato cold storage bays and WDRA-certified dry wheat blocks serving Jalandhar and Kapurthala farmers with zero unloading wait.",
+    status: "active",
+    mapX: 33,
+    mapY: 19,
+    isCatalog: true,
+  },
+  {
+    id: "wh-patiala-malwa",
+    ownerId: "catalog-owner-7",
+    name: "Patiala Shahi Grain Godown",
+    cityState: "Patiala, Punjab",
+    distanceKm: 19.4,
+    totalCapacityMt: 2900,
+    availableCapacityMt: 1120,
+    pricePerQuintalMonth: 17,
+    rating: 4.6,
+    facilities: ["Dry Grain Storage", "Loading Dock", "Pest Monitoring", "Fire Safety"],
+    description:
+      "High-roof moisture-sealed paddy and wheat godown near Rajpura highway with electronic receipt and farmer bagging support.",
+    status: "active",
+    mapX: 39,
+    mapY: 25,
+    isCatalog: true,
+  },
+  {
+    id: "wh-nagpur-vidarbha",
+    ownerId: "catalog-owner-8",
+    name: "Vidarbha Agri & Cotton Vault",
+    cityState: "Nagpur, Maharashtra",
+    distanceKm: 15.3,
+    totalCapacityMt: 2200,
+    availableCapacityMt: 680,
+    pricePerQuintalMonth: 21,
+    rating: 4.6,
+    facilities: ["Dry Grain Storage", "Fire Safety", "24x7 Security", "Digital Weighbridge"],
+    description:
+      "Ventilated storage chambers built for Vidarbha cotton bales, tur dal, oranges, and soybean near Kalamna Mandi.",
+    status: "active",
+    mapX: 55,
+    mapY: 60,
     isCatalog: true,
   },
   {
@@ -790,6 +1062,7 @@ export const SEEDED_PARTNER_COMPANIES: PartnerCompanyItem[] = [
     id: "comp-aic-pmfby",
     name: "Agriculture Insurance Company of India (AIC)",
     category: "insurance",
+    audience: "farmer",
     interestOrPremium: "1.5% Rabi / 2% Kharif farmer share",
     coverageOrLimit: "Up to Rs. 2,50,000 per hectare Sum Insured",
     eligibilitySummary:
@@ -803,6 +1076,7 @@ export const SEEDED_PARTNER_COMPANIES: PartnerCompanyItem[] = [
     id: "comp-iffco-tokio",
     name: "IFFCO-Tokio Rural Crop Shield",
     category: "insurance",
+    audience: "farmer",
     interestOrPremium: "2% Kharif / 5% Horticulture capped share",
     coverageOrLimit: "Standing crop, hailstorm & post-harvest 14-day protection",
     eligibilitySummary:
@@ -813,9 +1087,38 @@ export const SEEDED_PARTNER_COMPANIES: PartnerCompanyItem[] = [
     createdBy: "system-seed",
   },
   {
+    id: "comp-newindia-wh-ins",
+    name: "New India Commercial Warehouse & Fire Shield",
+    category: "insurance",
+    audience: "warehouse_owner",
+    interestOrPremium: "Custom commercial tariff (WDRA discount available)",
+    coverageOrLimit: "Rs. 50 Lakh to Rs. 25 Crore (Building, Fire, CAR & Stock Liability)",
+    eligibilitySummary:
+      "Registered grain godowns, cold storages, and newly constructed commercial warehouse facilities.",
+    contactHelpline: "1800-209-1415",
+    websiteUrl: "https://www.newindia.co.in/",
+    status: "active",
+    createdBy: "system-seed",
+  },
+  {
+    id: "comp-icici-lombard-wh",
+    name: "ICICI Lombard Cold-Chain & Godown Protect",
+    category: "insurance",
+    audience: "warehouse_owner",
+    interestOrPremium: "Bundled Machinery Breakdown + DOS Stock Cover",
+    coverageOrLimit: "Compressors, DG backup, solar arrays & stored produce spoilage",
+    eligibilitySummary:
+      "Commercial cold storages, multi-bay warehouses, and warehouse expansion sites under construction.",
+    contactHelpline: "1800-2666",
+    websiteUrl: "https://www.icicilombard.com/",
+    status: "active",
+    createdBy: "system-seed",
+  },
+  {
     id: "comp-sbi-kcc",
     name: "State Bank of India (SBI) Kisan Credit Desk",
     category: "loan",
+    audience: "farmer",
     interestOrPremium: "4% effective p.a. (with prompt repayment)",
     coverageOrLimit: "Up to Rs. 3,00,000 seasonal crop limit; collateral-free up to Rs. 2 Lakh",
     eligibilitySummary:
@@ -829,12 +1132,27 @@ export const SEEDED_PARTNER_COMPANIES: PartnerCompanyItem[] = [
     id: "comp-nabard-aif",
     name: "NABARD & PNB Agri Infrastructure Finance",
     category: "loan",
+    audience: "both",
     interestOrPremium: "3% interest subvention (capped max 9%)",
-    coverageOrLimit: "Rs. 5 Lakh to Rs. 2 Crore for warehouses, cold stores & tractors",
+    coverageOrLimit: "Rs. 5 Lakh to Rs. 2 Crore for warehouses, cold stores & infrastructure",
     eligibilitySummary:
-      "Progressive farmers, FPOs, PACS, and rural warehouse entrepreneurs.",
+      "Warehouse owners, commercial storage developers, FPOs, PACS, and progressive farmers.",
     contactHelpline: "1800-180-2222",
     websiteUrl: "https://agriinfra.dac.gov.in/",
+    status: "active",
+    createdBy: "system-seed",
+  },
+  {
+    id: "comp-sidbi-wh-loan",
+    name: "SIDBI & Commercial Godown Infra Credit Desk",
+    category: "loan",
+    audience: "warehouse_owner",
+    interestOrPremium: "8.75% – 10.75% p.a. (Term + Working Capital Overdraft)",
+    coverageOrLimit: "Rs. 25 Lakh to Rs. 5 Crore for construction, running capital & land purchase",
+    eligibilitySummary:
+      "Commercial warehouse proprietors, cold-chain operators, and logistics firms expanding godown sites.",
+    contactHelpline: "1800-22-6753",
+    websiteUrl: "https://www.sidbi.in/",
     status: "active",
     createdBy: "system-seed",
   },
@@ -914,6 +1232,34 @@ export const SEEDED_DEMO_CONSULTATIONS = [
 
 export const SEEDED_DEMO_TICKETS = [
   {
+    id: "ticket-demo-complaint-1",
+    userId: "demo-farmer-1",
+    category: "complaint" as const,
+    subject: "Warehouse Overcharging / Facility Dispute",
+    message:
+      "Storage godown billed Rs 18/quintal extra for moisture bagging despite agreed Rs 24/quintal/month booking rate. Requesting immediate fee review.",
+    priority: "urgent" as const,
+    status: "open" as const,
+    createdAtIso: "2026-11-22T02:15:00.000Z",
+    updatedAtIso: "2026-11-22T02:15:00.000Z",
+  },
+  {
+    id: "ticket-demo-complaint-2",
+    userId: "demo-farmer-1",
+    category: "complaint" as const,
+    subject: "Scheme / Subsidy Application Grievance",
+    message:
+      "Kharif PMFBY premium receipt was debited from KCC account but policy number has not reflected in district portal for 9 days.",
+    priority: "urgent" as const,
+    assignedEmployeeId: "demo-support-1",
+    assignedEmployeeName: "Vikram Verma",
+    employeeReply:
+      "Escalated policy UTR number to district crop insurance nodal officer for manual sync within 24 hours.",
+    status: "in_review" as const,
+    createdAtIso: "2026-11-19T06:40:00.000Z",
+    updatedAtIso: "2026-11-21T11:20:00.000Z",
+  },
+  {
     id: "ticket-demo-1",
     userId: "demo-farmer-1",
     category: "support" as const,
@@ -922,6 +1268,8 @@ export const SEEDED_DEMO_TICKETS = [
       "My PM-KISAN Aadhaar e-KYC shows pending even after OTP verification at CSC. Which bank record should I check?",
     priority: "urgent" as const,
     status: "open" as const,
+    createdAtIso: "2026-11-21T08:10:00.000Z",
+    updatedAtIso: "2026-11-21T08:10:00.000Z",
   },
   {
     id: "ticket-demo-2",
@@ -936,6 +1284,8 @@ export const SEEDED_DEMO_TICKETS = [
     employeeReply:
       "We coordinated with Malwa Godown — please cancel the pending 40 quintal request and submit a fresh 55 quintal request so capacity stays reserved.",
     status: "in_review" as const,
+    createdAtIso: "2026-11-20T05:30:00.000Z",
+    updatedAtIso: "2026-11-20T14:00:00.000Z",
   },
   {
     id: "ticket-demo-3",
@@ -950,6 +1300,8 @@ export const SEEDED_DEMO_TICKETS = [
     employeeReply:
       "Shared Tele-MANAS 14416 (press 4 for Tamil 24x7 counseling) and scheduled a group orientation note with Dr. Kavitha Sundaram.",
     status: "resolved" as const,
+    createdAtIso: "2026-11-17T09:15:00.000Z",
+    updatedAtIso: "2026-11-18T11:45:00.000Z",
   },
 ];
 

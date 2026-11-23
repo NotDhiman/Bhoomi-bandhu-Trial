@@ -7,6 +7,8 @@ import {
   WELLBEING_ARTICLES,
   type WarehouseItem,
 } from "../data/bhoomiData";
+import type { UserRole } from "./roles";
+import { getInsurancePlansForRole, getLoansForRole } from "./warehouseFinance";
 
 export type SearchModuleCategory =
   | "All"
@@ -29,13 +31,15 @@ export interface SearchResultItem {
 export function searchPlatformContent(
   rawQuery: string,
   extraWarehouses: WarehouseItem[] = [],
-  categoryFilter: SearchModuleCategory = "All"
+  categoryFilter: SearchModuleCategory = "All",
+  role?: UserRole
 ): SearchResultItem[] {
   const query = rawQuery.trim().toLowerCase();
   if (!query) {
     return [];
   }
 
+  const isOwner = role === "warehouse_owner";
   const results: SearchResultItem[] = [];
 
   const matches = (...fields: Array<string | string[] | undefined>): boolean => {
@@ -52,7 +56,7 @@ export function searchPlatformContent(
     return false;
   };
 
-  if (categoryFilter === "All" || categoryFilter === "Schemes") {
+  if (!isOwner && (categoryFilter === "All" || categoryFilter === "Schemes")) {
     for (const scheme of SCHEMES_DATA) {
       if (
         matches(
@@ -78,7 +82,7 @@ export function searchPlatformContent(
   }
 
   if (categoryFilter === "All" || categoryFilter === "Insurance") {
-    for (const plan of INSURANCE_PLANS) {
+    for (const plan of getInsurancePlansForRole(role, INSURANCE_PLANS)) {
       if (
         matches(
           plan.name,
@@ -101,7 +105,7 @@ export function searchPlatformContent(
   }
 
   if (categoryFilter === "All" || categoryFilter === "Loans") {
-    for (const loan of LOANS_DATA) {
+    for (const loan of getLoansForRole(role, LOANS_DATA)) {
       if (
         matches(
           loan.name,
@@ -142,7 +146,7 @@ export function searchPlatformContent(
     }
   }
 
-  if (categoryFilter === "All" || categoryFilter === "Well-Being") {
+  if (!isOwner && (categoryFilter === "All" || categoryFilter === "Well-Being")) {
     for (const article of WELLBEING_ARTICLES) {
       if (matches(article.title, article.topic, article.summary, article.practicalSteps)) {
         results.push({

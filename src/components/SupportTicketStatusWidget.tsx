@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import * as d3 from "d3";
-import { ArrowRight, Headphones } from "lucide-react";
+import { AlertTriangle, ArrowRight, Headphones } from "lucide-react";
 import {
   summarizeSupportTickets,
   type SupportTicketSummaryItem,
@@ -91,6 +91,27 @@ export function SupportTicketStatusWidget({
           <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>
+
+      {summary.activeComplaintsCount > 0 && (
+        <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 text-xs font-semibold text-red-900">
+            <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+            <span>
+              {summary.activeComplaintsCount} Active Priority Complaint
+              {summary.activeComplaintsCount > 1 ? "s" : ""} Flagged for
+              Immediate Review
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onInspectTickets}
+            className="text-xs font-bold text-red-800 hover:underline inline-flex items-center gap-1 self-start sm:self-auto"
+          >
+            <span>Review Complaints Now</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
         {/* D3 Donut Chart */}

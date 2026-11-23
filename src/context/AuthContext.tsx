@@ -15,8 +15,6 @@ import {
   createUserWithEmailAndPassword,
   getAuth,
   onAuthStateChanged,
-  sendEmailVerification,
-  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
@@ -70,6 +68,22 @@ import {
   validateEmployeeProvisionInput,
   validateFirstLoginPasswordChange,
 } from "../utils/employeeAccess";
+import {
+  createLocalAuthRecord,
+  normalizeAuthEmail,
+  sanitizePublicSignupRole,
+  toSessionCredential,
+  verifyLocalAuthRecord,
+  type StoredLocalAuthRecord,
+} from "../utils/appAuth";
+import {
+  normalizePsychiatristSettings,
+  validatePsychiatristSettings,
+  type PsychiatristSettingsPayload,
+} from "../utils/psychiatristSettings";
+import { validateWarehouseUpdateInput } from "../utils/warehouseDashboard";
+import { parseFirestoreTimestampToIso } from "../utils/supportTicketStats";
+import { getSafeExternalUrl } from "../utils/safeUrl";
 
 export type { UserRole } from "../utils/roles";
 
@@ -162,7 +176,7 @@ export interface NotificationRecord {
 export interface SupportTicketRecord {
   id: string;
   userId: string;
-  category: "support" | "wellbeing";
+  category: "support" | "complaint" | "wellbeing";
   subject: string;
   message: string;
   priority?: "normal" | "urgent";
@@ -170,6 +184,8 @@ export interface SupportTicketRecord {
   assignedEmployeeName?: string;
   employeeReply?: string;
   status: "open" | "in_review" | "resolved";
+  createdAtIso?: string;
+  updatedAtIso?: string;
 }
 
 export interface ConsultationRecord {
@@ -209,12 +225,18 @@ interface AuthContextValue {
   allConsultations: ConsultationRecord[];
   supportEmployees: SupportEmployeeRecord[];
   mailOutbox: AutomatedMailRecord[];
-  signInWithGoogle: (preferredRole?: UserRole) => Promise<void>;
+  signInWithGoogle: (
+    preferredRole?: UserRole,
+    preferredState?: string,
+    preferredDistrict?: string
+  ) => Promise<void>;
   signUpWithEmail: (params: {
     name: string;
     email: string;
     password: string;
     role: UserRole;
+    state?: string;
+    district?: string;
     specialization?: string;
     qualification?: string;
     department?: string;
@@ -248,8 +270,14 @@ interface AuthContextValue {
     facilities: string[];
     description: string;
   }) => Promise<void>;
+  updateWarehouseListing: (payload: {
+    warehouseId: string;
+    availableCapacityMt: number;
+    pricePerQuintalMonth: number;
+    status: "active" | "paused";
+  }) => Promise<void>;
   submitSupportTicket: (payload: {
-    category: "support" | "wellbeing";
+    category: "support" | "complaint" | "wellbeing";
     subject: string;
     message: string;
     priority?: "normal" | "urgent";
@@ -274,6 +302,9 @@ interface AuthContextValue {
     doctorResponse?: string;
   }) => Promise<void>;
   togglePsychiatristAvailability: (available: boolean) => Promise<void>;
+  updatePsychiatristSettings: (
+    payload: PsychiatristSettingsPayload
+  ) => Promise<void>;
   addPartnerCompany: (payload: {
     name: string;
     category: "loan" | "insurance";
@@ -375,15 +406,143 @@ function buildInitialDemoUsers(): UserProfileData[] {
   ];
 }
 
+const ACTIVE_SESSION_KEY = "bhoomi_active_session_v1";
+const LOCAL_ACCOUNTS_KEY = "bhoomi_local_accounts_v1";
+const LOCAL_USERS_KEY = "bhoomi_local_users_v1";
+
+function readStoredSession(): DemoAccountCredential | null {
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DemoAccountCredential;
+    return parsed?.id && parsed?.email ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(cred: DemoAccountCredential | null) {
+  try {
+    if (!cred) {
+      window.localStorage.removeItem(ACTIVE_SESSION_KEY);
+      return;
+    }
+    window.localStorage.setItem(
+      ACTIVE_SESSION_KEY,
+      JSON.stringify({ ...cred, password: "" })
+    );
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+function readLocalAuthRecords(): StoredLocalAuthRecord[] {
+  try {
+    const raw = window.localStorage.getItem(LOCAL_ACCOUNTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as StoredLocalAuthRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalAuthRecords(records: StoredLocalAuthRecord[]) {
+  try {
+    window.localStorage.setItem(LOCAL_ACCOUNTS_KEY, JSON.stringify(records));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+function readStoredLocalUsers(): UserProfileData[] {
+  try {
+    const raw = window.localStorage.getItem(LOCAL_USERS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as UserProfileData[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+const PSYCH_PREFS_KEY = "bhoomi_psych_prefs_v1";
+
+function readPsychPrefsMap(): Record<string, Partial<PsychiatristProfileItem>> {
+  try {
+    const raw = window.localStorage.getItem(PSYCH_PREFS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, Partial<PsychiatristProfileItem>>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePsychPrefsMap(
+  prefs: Record<string, Partial<PsychiatristProfileItem>>
+) {
+  try {
+    window.localStorage.setItem(PSYCH_PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+const DEMO_WAREHOUSES_KEY = "bhoomi_demo_warehouses_v1";
+
+function readStoredDemoWarehouses(): WarehouseItem[] {
+  try {
+    const raw = window.localStorage.getItem(DEMO_WAREHOUSES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as WarehouseItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredDemoWarehouses(items: WarehouseItem[]) {
+  try {
+    window.localStorage.setItem(DEMO_WAREHOUSES_KEY, JSON.stringify(items));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+function writeStoredLocalUsers(users: UserProfileData[]) {
+  try {
+    window.localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
-  const [demoAccount, setDemoAccount] = useState<DemoAccountCredential | null>(
-    null
-  );
+  const [demoAccount, setDemoAccountState] =
+    useState<DemoAccountCredential | null>(() => readStoredSession());
+  const setDemoAccount = (
+    next:
+      | DemoAccountCredential
+      | null
+      | ((prev: DemoAccountCredential | null) => DemoAccountCredential | null)
+  ) => {
+    setDemoAccountState((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      writeStoredSession(resolved);
+      return resolved;
+    });
+  };
   const [profile, setProfile] = useState<UserProfileData | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [firebaseAdmin, setFirebaseAdmin] = useState(false);
   const pendingGoogleRoleRef = useRef<UserRole>("farmer");
+  const pendingGoogleStateRef = useRef<string>("");
+  const pendingGoogleDistrictRef = useRef<string>("");
+  const serverSessionTokenRef = useRef<string | null>(null);
 
   // Live Firestore collections
   const [savedSchemes, setSavedSchemes] = useState<SavedSchemeRecord[]>([]);
@@ -423,10 +582,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  // Interactive Sandbox State (persists across role switches in the same browser session)
-  const [demoUsers, setDemoUsers] = useState<UserProfileData[]>(() =>
-    buildInitialDemoUsers()
-  );
+  // Interactive Sandbox State (persists across role switches and reloads in the same browser)
+  const [demoUsers, setDemoUsers] = useState<UserProfileData[]>(() => {
+    const base = buildInitialDemoUsers();
+    const persisted = readStoredLocalUsers();
+    const merged = [...persisted];
+    for (const b of base) {
+      if (!merged.some((u) => u.uid === b.uid)) {
+        merged.push(b);
+      }
+    }
+    return merged;
+  });
   const [demoProvisionedAccounts, setDemoProvisionedAccounts] = useState<
     DemoAccountCredential[]
   >([]);
@@ -471,7 +638,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [demoBookings, setDemoBookings] = useState<BookingRecord[]>(
     () => SEEDED_DEMO_BOOKINGS
   );
-  const [demoWarehouses, setDemoWarehouses] = useState<WarehouseItem[]>([]);
+  const [demoWarehouses, setDemoWarehouses] = useState<WarehouseItem[]>(() =>
+    readStoredDemoWarehouses()
+  );
   const [demoSavedSchemes, setDemoSavedSchemes] = useState<SavedSchemeRecord[]>(
     [
       {
@@ -673,8 +842,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: sanitizeStr(fbUser.email || "user@bhoomibandhu.in", 160),
             role: safeRole,
             phone: "",
-            state: "Punjab",
-            district: "",
+            state: sanitizeStr(pendingGoogleStateRef.current || "", 80),
+            district: sanitizeStr(pendingGoogleDistrictRef.current || "", 80),
             landSizeAcres: safeRole === "farmer" ? 2.5 : 0,
             primaryCrops: safeRole === "farmer" ? ["Wheat", "Paddy"] : [],
             ...(safeRole === "psychiatrist"
@@ -714,6 +883,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       const found = demoUsers.find((u) => u.uid === demoAccount.id);
       if (found) return found;
+      return {
+        uid: demoAccount.id,
+        name: demoAccount.name,
+        email: demoAccount.email,
+        role: demoAccount.role,
+        phone: demoAccount.phone,
+        state: demoAccount.state,
+        district: demoAccount.district,
+        landSizeAcres: demoAccount.landSizeAcres,
+        primaryCrops: demoAccount.primaryCrops,
+        specialization: demoAccount.specialization,
+        qualification: demoAccount.qualification,
+        department: demoAccount.department,
+        availableForConsult: demoAccount.role === "psychiatrist" ? true : undefined,
+        notificationsEnabled: true,
+      };
     }
     return profile;
   }, [isDemoMode, demoAccount, demoUsers, profile]);
@@ -734,7 +919,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: String(d.email || firebaseUser.email || ""),
             role: roleVal,
             phone: String(d.phone || ""),
-            state: String(d.state || "Punjab"),
+            state: String(d.state || ""),
             district: String(d.district || ""),
             landSizeAcres: Number(d.landSizeAcres ?? 2.5),
             primaryCrops: Array.isArray(d.primaryCrops)
@@ -959,7 +1144,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return {
               id: d.id,
               userId: String(data.userId),
-              category: data.category,
+              category:
+                data.category === "complaint"
+                  ? "complaint"
+                  : data.category === "wellbeing"
+                  ? "wellbeing"
+                  : "support",
               subject: String(data.subject),
               message: String(data.message),
               priority: data.priority === "urgent" ? "urgent" : "normal",
@@ -973,6 +1163,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 ? String(data.employeeReply)
                 : undefined,
               status: data.status,
+              createdAtIso: parseFirestoreTimestampToIso(data.createdAt),
+              updatedAtIso: parseFirestoreTimestampToIso(data.updatedAt),
             };
           })
         );
@@ -1009,7 +1201,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return {
                   id: d.id,
                   userId: String(data.userId),
-                  category: data.category,
+                  category:
+                    data.category === "complaint"
+                      ? "complaint"
+                      : data.category === "wellbeing"
+                      ? "wellbeing"
+                      : "support",
                   subject: String(data.subject),
                   message: String(data.message),
                   priority: data.priority === "urgent" ? "urgent" : "normal",
@@ -1023,6 +1220,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     ? String(data.employeeReply)
                     : undefined,
                   status: data.status,
+                  createdAtIso: parseFirestoreTimestampToIso(data.createdAt),
+                  updatedAtIso: parseFirestoreTimestampToIso(data.updatedAt),
                 };
               })
             );
@@ -1249,14 +1448,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isDemoMode, demoCompanies, firestoreCompanies]);
 
   const psychiatrists = useMemo(() => {
-    if (isDemoMode) return demoPsychiatrists;
+    const prefsMap = readPsychPrefsMap();
+    const applyPrefs = (item: PsychiatristProfileItem): PsychiatristProfileItem => {
+      const saved = prefsMap[item.userId] || prefsMap[item.id];
+      return saved ? { ...item, ...saved } : item;
+    };
+    if (isDemoMode) return demoPsychiatrists.map(applyPrefs);
     const merged = [...firestorePsychiatrists];
     for (const seeded of SEEDED_PSYCHIATRISTS) {
       if (!merged.some((p) => p.id === seeded.id)) {
         merged.push(seeded);
       }
     }
-    return merged;
+    return merged.map(applyPrefs);
   }, [isDemoMode, demoPsychiatrists, firestorePsychiatrists]);
 
   const effectiveSavedSchemes = isDemoMode
@@ -1338,13 +1542,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // Auth methods
-  const signInWithGoogle = async (preferredRole: UserRole = "farmer") => {
+  const signInWithGoogle = async (
+    preferredRole: UserRole = "farmer",
+    preferredState = "",
+    preferredDistrict = ""
+  ) => {
     setDemoAccount(null);
     const safeRole: UserRole =
       preferredRole === "warehouse_owner" || preferredRole === "psychiatrist"
         ? preferredRole
         : "farmer";
+    const cleanState = sanitizeStr(preferredState, 80);
+    const cleanDistrict = sanitizeStr(preferredDistrict, 80);
     pendingGoogleRoleRef.current = safeRole;
+    pendingGoogleStateRef.current = cleanState;
+    pendingGoogleDistrictRef.current = cleanDistrict;
     const cred = await signInWithPopup(auth, googleProvider);
     const userRef = doc(db, "users", cred.user.uid);
     const snap = await getDoc(userRef);
@@ -1359,8 +1571,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: sanitizeStr(cred.user.email || "", 160),
         role: safeRole,
         phone: "",
-        state: "Punjab",
-        district: "",
+        state: cleanState,
+        district: cleanDistrict,
         landSizeAcres: safeRole === "farmer" ? 2.5 : 0,
         primaryCrops: safeRole === "farmer" ? ["Wheat"] : [],
         ...(safeRole === "psychiatrist" ? { availableForConsult: true } : {}),
@@ -1376,7 +1588,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           specialization: "Farmer Mental Health & Stress Support",
           languages: ["Hindi", "English"],
           experienceYears: 5,
-          state: "India",
+          state: cleanState || "India",
           bio: "Confidential rural mental health specialist.",
           availableForConsult: true,
           createdAt: serverTimestamp(),
@@ -1386,230 +1598,372 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const persistLocalUserProfile = (nextProfile: UserProfileData) => {
+    setDemoUsers((prev) => {
+      const updated = [
+        nextProfile,
+        ...prev.filter((u) => u.uid !== nextProfile.uid),
+      ];
+      writeStoredLocalUsers(
+        updated.filter((u) => u.uid.startsWith("app_") || u.uid.startsWith("local-") || u.uid.startsWith("emp_"))
+      );
+      return updated;
+    });
+  };
+
   const signUpWithEmail: AuthContextValue["signUpWithEmail"] = async ({
     name,
     email,
     password,
     role,
+    state = "",
+    district = "",
     specialization,
     qualification,
     department,
   }) => {
     setDemoAccount(null);
     const cleanName = sanitizeStr(name, 100);
-    const cleanEmail = sanitizeStr(email.trim(), 160);
-    const safeRole: UserRole =
-      role === "warehouse_owner" || role === "psychiatrist"
-        ? role
-        : "farmer";
+    const cleanEmail = sanitizeStr(normalizeAuthEmail(email), 160);
+    const cleanState = sanitizeStr(state, 80);
+    const cleanDistrict = sanitizeStr(district, 80);
+    const safeRole: UserRole = sanitizePublicSignupRole(role);
 
-    const duplicateInSandbox =
-      DEMO_ACCOUNTS.some(
-        (acc) => acc.email.toLowerCase() === cleanEmail.toLowerCase()
-      ) ||
-      demoProvisionedAccounts.some(
-        (acc) => acc.email.toLowerCase() === cleanEmail.toLowerCase()
-      );
-    if (duplicateInSandbox) {
+    if (cleanEmail === ADMIN_BOOTSTRAP_EMAIL) {
       throw new Error(
-        "An account with this email already exists in this session. Please log in instead."
+        "This administrator email is reserved. Please click 'Continue with Google' below to sign in."
       );
     }
 
-    try {
-      const cred = await createUserWithEmailAndPassword(
-        auth,
-        cleanEmail,
-        password
+    const existingLocal = readLocalAuthRecords();
+    const duplicateInApp =
+      DEMO_ACCOUNTS.some(
+        (acc) => acc.email.toLowerCase() === cleanEmail
+      ) ||
+      demoProvisionedAccounts.some(
+        (acc) => acc.email.toLowerCase() === cleanEmail
+      ) ||
+      existingLocal.some(
+        (rec) => rec.credential.email.toLowerCase() === cleanEmail
       );
-      await updateProfile(cred.user, { displayName: cleanName });
-      try {
-        await sendEmailVerification(cred.user);
-      } catch {
-        // ignore throttle
-      }
-      await setDoc(doc(db, "users", cred.user.uid), {
-        uid: cred.user.uid,
-        name: cleanName,
-        email: cleanEmail,
-        role: safeRole,
-        phone: "",
-        state: "Punjab",
-        district: "",
-        landSizeAcres: safeRole === "farmer" ? 2.5 : 0,
-        primaryCrops: safeRole === "farmer" ? ["Wheat"] : [],
-        ...(specialization?.trim()
-          ? { specialization: sanitizeStr(specialization, 100) }
-          : {}),
-        ...(qualification?.trim()
-          ? { qualification: sanitizeStr(qualification, 100) }
-          : {}),
-        ...(department?.trim()
-          ? { department: sanitizeStr(department, 80) }
-          : {}),
-        ...(safeRole === "psychiatrist" ? { availableForConsult: true } : {}),
-        notificationsEnabled: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+    if (duplicateInApp) {
+      throw new Error(
+        "An account with this email already exists. Please log in instead."
+      );
+    }
 
-      if (safeRole === "psychiatrist") {
-        await setDoc(doc(db, "psychiatrists", cred.user.uid), {
-          userId: cred.user.uid,
-          name: cleanName,
-          qualification: sanitizeStr(qualification || "MD Psychiatry", 100),
-          specialization: sanitizeStr(
-            specialization || "Rural Stress & Farmer Well-Being",
-            120
-          ),
-          languages: ["Hindi", "English"],
-          experienceYears: 5,
-          state: "India",
-          bio: "Confidential consultation specialist on BhoomiBandhu.",
-          availableForConsult: true,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      }
-    } catch (err) {
-      if (!isOperationNotAllowed(err)) {
-        throw err;
-      }
-
-      // Firebase Email/Password provider is not enabled in Console yet:
-      // seamlessly provision a local session account (never Admin/Support Staff) so signup works right away.
-      const sandboxUid = `local-${safeRole}-${Date.now()}`;
-      const badgeLabel =
+    const generatedUid = `app_${safeRole}_${Date.now()}`;
+    let accountCred: DemoAccountCredential = {
+      id: generatedUid,
+      role: safeRole,
+      label:
+        safeRole === "warehouse_owner"
+          ? "Warehouse Account"
+          : safeRole === "psychiatrist"
+          ? "Doctor Account"
+          : "Farmer Account",
+      badge:
         safeRole === "warehouse_owner"
           ? "Warehouse"
           : safeRole === "psychiatrist"
           ? "Doctor"
-          : "Farmer";
+          : "Farmer",
+      name: cleanName,
+      email: cleanEmail,
+      password: "",
+      state: cleanState,
+      district: cleanDistrict,
+      phone: "",
+      landSizeAcres: safeRole === "farmer" ? 2.5 : 0,
+      primaryCrops: safeRole === "farmer" ? ["Wheat"] : [],
+      specialization: specialization?.trim()
+        ? sanitizeStr(specialization, 100)
+        : safeRole === "psychiatrist"
+        ? "Rural Stress & Farmer Well-Being"
+        : undefined,
+      qualification: qualification?.trim()
+        ? sanitizeStr(qualification, 100)
+        : safeRole === "psychiatrist"
+        ? "MD Psychiatry"
+        : undefined,
+      department: department?.trim() ? sanitizeStr(department, 80) : undefined,
+      summary: "Registered BhoomiBandhu account.",
+    };
 
-      const sandboxCred: DemoAccountCredential = {
-        id: sandboxUid,
-        role: safeRole,
-        label: `${badgeLabel} Session Account`,
-        badge: badgeLabel,
-        name: cleanName,
-        email: cleanEmail,
-        password,
-        state: "Punjab",
-        district: "",
-        phone: "",
-        landSizeAcres: safeRole === "farmer" ? 2.5 : 0,
-        primaryCrops: safeRole === "farmer" ? ["Wheat"] : [],
-        specialization: specialization?.trim()
-          ? sanitizeStr(specialization, 100)
-          : safeRole === "psychiatrist"
-          ? "Rural Stress & Farmer Well-Being"
-          : undefined,
-        qualification: qualification?.trim()
-          ? sanitizeStr(qualification, 100)
-          : safeRole === "psychiatrist"
-          ? "MD Psychiatry"
-          : undefined,
-        summary: "Session-scoped account created while Email/Password auth is pending Firebase Console setup.",
-      };
-
-      const sandboxProfile: UserProfileData = {
-        uid: sandboxUid,
-        name: cleanName,
-        email: cleanEmail,
-        role: safeRole,
-        phone: "",
-        state: "Punjab",
-        district: "",
-        landSizeAcres: safeRole === "farmer" ? 2.5 : 0,
-        primaryCrops: safeRole === "farmer" ? ["Wheat"] : [],
-        specialization: sandboxCred.specialization,
-        qualification: sandboxCred.qualification,
-        availableForConsult: safeRole === "psychiatrist" ? true : undefined,
-        notificationsEnabled: true,
-      };
-
-      setDemoProvisionedAccounts((prev) => [sandboxCred, ...prev]);
-      setDemoUsers((prev) => [sandboxProfile, ...prev]);
-
-      if (safeRole === "psychiatrist") {
-        setDemoPsychiatrists((prev) => [
-          {
-            id: sandboxUid,
-            userId: sandboxUid,
-            name: cleanName,
-            qualification: sandboxCred.qualification || "MD Psychiatry",
-            specialization:
-              sandboxCred.specialization ||
-              "Rural Stress & Farmer Well-Being",
-            languages: ["Hindi", "English"],
-            experienceYears: 5,
-            state: "India",
-            bio: "Confidential consultation specialist on BhoomiBandhu.",
-            availableForConsult: true,
-          },
-          ...prev,
-        ]);
+    try {
+      const regRes = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: generatedUid,
+          name: cleanName,
+          email: cleanEmail,
+          password,
+          role: safeRole,
+          state: cleanState,
+          district: cleanDistrict,
+          specialization: accountCred.specialization,
+          qualification: accountCred.qualification,
+          department: accountCred.department,
+        }),
+      });
+      if (regRes.status === 409) {
+        const errBody = (await regRes.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(
+          errBody.error ||
+            "An account with this email already exists. Please log in instead."
+        );
       }
-
-      setDemoNotifications((prev) => [
-        {
-          id: `notif-welcome-${Date.now()}`,
-          userId: sandboxUid,
-          category: "system",
-          title: "Welcome to BhoomiBandhu (Session Account)",
-          description:
-            "Email/Password provider is not enabled in Firebase Console yet, so this account runs in local session mode. Use Google Sign-In for cloud persistence.",
-          read: false,
-        },
-        ...prev,
-      ]);
-
-      setDemoAccount(sandboxCred);
-      setAuthReady(true);
+      if (regRes.ok) {
+        const data = (await regRes.json()) as {
+          account?: Omit<DemoAccountCredential, "password">;
+          sessionToken?: string;
+        };
+        if (typeof data.sessionToken === "string" && data.sessionToken) {
+          serverSessionTokenRef.current = data.sessionToken;
+        }
+        if (data.account) {
+          accountCred = toSessionCredential(data.account);
+        }
+      }
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message.includes("already exists")
+      ) {
+        throw err;
+      }
+      // Continue with client-side salted hash persistence if offline/transient
     }
+
+    const { password: _unusedPwd, ...credWithoutPassword } = accountCred;
+    const localRecord = await createLocalAuthRecord(
+      credWithoutPassword,
+      password,
+      false
+    );
+    writeLocalAuthRecords([
+      localRecord,
+      ...existingLocal.filter(
+        (r) => r.credential.email.toLowerCase() !== cleanEmail
+      ),
+    ]);
+
+    const appProfile: UserProfileData = {
+      uid: accountCred.id,
+      name: cleanName,
+      email: cleanEmail,
+      role: safeRole,
+      phone: "",
+      state: cleanState,
+      district: cleanDistrict,
+      landSizeAcres: safeRole === "farmer" ? 2.5 : 0,
+      primaryCrops: safeRole === "farmer" ? ["Wheat"] : [],
+      specialization: accountCred.specialization,
+      qualification: accountCred.qualification,
+      department: accountCred.department,
+      availableForConsult: safeRole === "psychiatrist" ? true : undefined,
+      notificationsEnabled: true,
+    };
+
+    setDemoProvisionedAccounts((prev) => [
+      { ...accountCred, password },
+      ...prev.filter((a) => a.email.toLowerCase() !== cleanEmail),
+    ]);
+    persistLocalUserProfile(appProfile);
+
+    if (safeRole === "psychiatrist") {
+      setDemoPsychiatrists((prev) => [
+        {
+          id: accountCred.id,
+          userId: accountCred.id,
+          name: cleanName,
+          qualification: accountCred.qualification || "MD Psychiatry",
+          specialization:
+            accountCred.specialization ||
+            "Rural Stress & Farmer Well-Being",
+          languages: ["Hindi", "English"],
+          experienceYears: 5,
+          state: cleanState || "India",
+          bio: "Confidential consultation specialist on BhoomiBandhu.",
+          availableForConsult: true,
+        },
+        ...prev.filter((p) => p.userId !== accountCred.id),
+      ]);
+    }
+
+    setDemoNotifications((prev) => [
+      {
+        id: `notif-welcome-${Date.now()}`,
+        userId: accountCred.id,
+        category: "system",
+        title: "Welcome to BhoomiBandhu",
+        description:
+          "Your account is active. Explore schemes, crop weather advisor, regional warehouses, and support tools.",
+        read: false,
+      },
+      ...prev,
+    ]);
+
+    setDemoAccount(accountCred);
+    setAuthReady(true);
   };
 
   const logInWithEmail = async (email: string, password: string) => {
-    const cleanEmail = email.trim();
+    const cleanEmail = normalizeAuthEmail(email);
     const matchedDemo = matchDemoCredential(cleanEmail, password);
     if (matchedDemo) {
       setDemoAccount(matchedDemo);
       setAuthReady(true);
       return;
     }
+
     const matchedProvisioned = demoProvisionedAccounts.find(
       (acc) =>
-        acc.email.toLowerCase() === cleanEmail.toLowerCase() &&
-        acc.password === password
+        acc.email.toLowerCase() === cleanEmail && acc.password === password
     );
     if (matchedProvisioned) {
-      setDemoAccount(matchedProvisioned);
+      setDemoAccount(toSessionCredential(matchedProvisioned));
       setAuthReady(true);
       return;
     }
+
+    // Check server-backed scrypt auth store
+    try {
+      const loginRes = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: cleanEmail, password }),
+      });
+      if (loginRes.ok) {
+        const data = (await loginRes.json()) as {
+          account?: Omit<DemoAccountCredential, "password"> & {
+            mustChangePassword?: boolean;
+          };
+          sessionToken?: string;
+        };
+        if (typeof data.sessionToken === "string" && data.sessionToken) {
+          serverSessionTokenRef.current = data.sessionToken;
+        }
+        if (data.account) {
+          const sessionCred = toSessionCredential(data.account);
+          persistLocalUserProfile({
+            uid: sessionCred.id,
+            name: sessionCred.name,
+            email: sessionCred.email,
+            role: sessionCred.role,
+            phone: sessionCred.phone,
+            state: sessionCred.state,
+            district: sessionCred.district,
+            landSizeAcres: sessionCred.landSizeAcres,
+            primaryCrops: sessionCred.primaryCrops,
+            specialization: sessionCred.specialization,
+            qualification: sessionCred.qualification,
+            department: sessionCred.department,
+            availableForConsult:
+              sessionCred.role === "psychiatrist" ? true : undefined,
+            notificationsEnabled: true,
+            mustChangePassword: Boolean(data.account.mustChangePassword),
+          });
+          setDemoAccount(sessionCred);
+          setAuthReady(true);
+          return;
+        }
+      } else if (loginRes.status === 401) {
+        const errBody = (await loginRes.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(
+          errBody.error ||
+            "Incorrect email or password. Please check your credentials and try again."
+        );
+      }
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message.includes("Incorrect email or password")
+      ) {
+        throw err;
+      }
+    }
+
+    // Check browser-persisted salted hash backup (survives container restarts)
+    const localRecords = readLocalAuthRecords();
+    const localRec = localRecords.find(
+      (r) => r.credential.email.toLowerCase() === cleanEmail
+    );
+    if (localRec) {
+      const valid = await verifyLocalAuthRecord(localRec, password);
+      if (!valid) {
+        throw new Error(
+          "Incorrect email or password. Please check your credentials and try again."
+        );
+      }
+      const sessionCred = toSessionCredential(localRec.credential);
+      persistLocalUserProfile({
+        uid: sessionCred.id,
+        name: sessionCred.name,
+        email: sessionCred.email,
+        role: sessionCred.role,
+        phone: sessionCred.phone,
+        state: sessionCred.state,
+        district: sessionCred.district,
+        landSizeAcres: sessionCred.landSizeAcres,
+        primaryCrops: sessionCred.primaryCrops,
+        specialization: sessionCred.specialization,
+        qualification: sessionCred.qualification,
+        department: sessionCred.department,
+        availableForConsult:
+          sessionCred.role === "psychiatrist" ? true : undefined,
+        notificationsEnabled: true,
+        mustChangePassword: Boolean(localRec.mustChangePassword),
+      });
+      setDemoAccount(sessionCred);
+      setAuthReady(true);
+      return;
+    }
+
+    if (cleanEmail === ADMIN_BOOTSTRAP_EMAIL) {
+      throw new Error(
+        "Live Administrator access uses Google Sign-In. Click 'Continue with Google' below with pranav25dhiman1107@gmail.com, or test using 'Admin Sandbox Preview' on the right."
+      );
+    }
+
+    // Optional Firebase Email/Password fallback (only if user enabled it manually in Firebase Console)
     try {
       await signInWithEmailAndPassword(auth, cleanEmail, password);
       setDemoAccount(null);
     } catch (err) {
       if (isOperationNotAllowed(err)) {
-        throw new Error("FIREBASE_EMAIL_PASSWORD_DISABLED");
+        throw new Error(
+          "Incorrect email or password, or no account exists with this email yet. Please check your details or click Sign Up."
+        );
       }
       throw err;
     }
   };
 
   const resetPassword = async (email: string) => {
-    try {
-      await sendPasswordResetEmail(auth, email.trim());
-    } catch (err) {
-      if (isOperationNotAllowed(err)) {
-        throw new Error("FIREBASE_EMAIL_PASSWORD_DISABLED");
-      }
-      throw err;
+    const cleanEmail = normalizeAuthEmail(email);
+    const res = await fetch("/api/auth/reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: cleanEmail }),
+    });
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      throw new Error(
+        errBody.error || "Please enter a valid email address."
+      );
     }
   };
 
   const logOut = async () => {
+    serverSessionTokenRef.current = null;
     setDemoAccount(null);
     setProfile(null);
     if (firebaseUser) {
@@ -1618,40 +1972,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const updateUserProfile = async (updates: Partial<UserProfileData>) => {
-    if (!user || !profile) {
+    if (!user || !effectiveProfile) {
       throw new Error("Please sign in to save your profile.");
     }
     if (isDemoMode) {
-      setDemoUsers((prev) =>
-        prev.map((u) =>
-          u.uid === user.uid
-            ? {
-                ...u,
-                name: sanitizeStr(updates.name ?? u.name, 100),
-                phone: sanitizeStr(updates.phone ?? u.phone, 24),
-                state: sanitizeStr(updates.state ?? u.state, 80),
-                district: sanitizeStr(updates.district ?? u.district, 80),
-                landSizeAcres: Number(updates.landSizeAcres ?? u.landSizeAcres),
-                primaryCrops: (updates.primaryCrops ?? u.primaryCrops)
-                  .slice(0, 10)
-                  .map((c) => sanitizeStr(c, 40)),
-                specialization:
-                  updates.specialization !== undefined
-                    ? sanitizeStr(updates.specialization, 100)
-                    : u.specialization,
-                qualification:
-                  updates.qualification !== undefined
-                    ? sanitizeStr(updates.qualification, 100)
-                    : u.qualification,
-                department:
-                  updates.department !== undefined
-                    ? sanitizeStr(updates.department, 80)
-                    : u.department,
-                notificationsEnabled:
-                  updates.notificationsEnabled ?? u.notificationsEnabled,
-              }
-            : u
-        )
+      const updatedProfile: UserProfileData = {
+        ...effectiveProfile,
+        name: sanitizeStr(updates.name ?? effectiveProfile.name, 100),
+        phone: sanitizeStr(updates.phone ?? effectiveProfile.phone, 24),
+        state: sanitizeStr(updates.state ?? effectiveProfile.state, 80),
+        district: sanitizeStr(updates.district ?? effectiveProfile.district, 80),
+        landSizeAcres: Number(
+          updates.landSizeAcres ?? effectiveProfile.landSizeAcres
+        ),
+        primaryCrops: (updates.primaryCrops ?? effectiveProfile.primaryCrops)
+          .slice(0, 10)
+          .map((c) => sanitizeStr(c, 40)),
+        specialization:
+          updates.specialization !== undefined
+            ? sanitizeStr(updates.specialization, 100)
+            : effectiveProfile.specialization,
+        qualification:
+          updates.qualification !== undefined
+            ? sanitizeStr(updates.qualification, 100)
+            : effectiveProfile.qualification,
+        department:
+          updates.department !== undefined
+            ? sanitizeStr(updates.department, 80)
+            : effectiveProfile.department,
+        notificationsEnabled:
+          updates.notificationsEnabled ?? effectiveProfile.notificationsEnabled,
+      };
+      persistLocalUserProfile(updatedProfile);
+      setDemoAccount((prev) =>
+        prev
+          ? {
+              ...prev,
+              name: updatedProfile.name,
+              state: updatedProfile.state,
+              district: updatedProfile.district,
+              phone: updatedProfile.phone,
+            }
+          : prev
       );
       return;
     }
@@ -1659,12 +2021,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const path = `users/${user.uid}`;
     try {
       await updateDoc(doc(db, "users", user.uid), {
-        name: sanitizeStr(updates.name ?? profile.name, 100),
-        phone: sanitizeStr(updates.phone ?? profile.phone, 24),
-        state: sanitizeStr(updates.state ?? profile.state, 80),
-        district: sanitizeStr(updates.district ?? profile.district, 80),
-        landSizeAcres: Number(updates.landSizeAcres ?? profile.landSizeAcres),
-        primaryCrops: (updates.primaryCrops ?? profile.primaryCrops)
+        name: sanitizeStr(updates.name ?? effectiveProfile.name, 100),
+        phone: sanitizeStr(updates.phone ?? effectiveProfile.phone, 24),
+        state: sanitizeStr(updates.state ?? effectiveProfile.state, 80),
+        district: sanitizeStr(updates.district ?? effectiveProfile.district, 80),
+        landSizeAcres: Number(
+          updates.landSizeAcres ?? effectiveProfile.landSizeAcres
+        ),
+        primaryCrops: (updates.primaryCrops ?? effectiveProfile.primaryCrops)
           .slice(0, 10)
           .map((c) => sanitizeStr(c, 40)),
         ...(updates.specialization !== undefined
@@ -1677,7 +2041,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ? { department: sanitizeStr(updates.department, 80) }
           : {}),
         notificationsEnabled:
-          updates.notificationsEnabled ?? profile.notificationsEnabled,
+          updates.notificationsEnabled ?? effectiveProfile.notificationsEnabled,
         updatedAt: serverTimestamp(),
       });
     } catch (err) {
@@ -1859,28 +2223,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (payload) => {
       if (!user) throw new Error("AUTH_REQUIRED");
       if (isDemoMode) {
-        setDemoWarehouses((prev) => [
-          {
-            id: `wh-demo-${Date.now()}`,
-            ownerId: user.uid,
-            name: sanitizeStr(payload.name, 120),
-            cityState: sanitizeStr(payload.cityState, 120),
-            distanceKm: 4.5,
-            totalCapacityMt: Number(payload.totalCapacityMt),
-            availableCapacityMt: Number(payload.availableCapacityMt),
-            pricePerQuintalMonth: Number(payload.pricePerQuintalMonth),
-            rating: 4.8,
-            facilities: payload.facilities
-              .slice(0, 8)
-              .map((f) => sanitizeStr(f, 40)),
-            description: sanitizeStr(payload.description, 600),
-            status: "active",
-            mapX: 52,
-            mapY: 42,
-            isCatalog: false,
-          },
-          ...prev,
-        ]);
+        const newItem: WarehouseItem = {
+          id: `wh-demo-${Date.now()}`,
+          ownerId: user.uid,
+          name: sanitizeStr(payload.name, 120),
+          cityState: sanitizeStr(payload.cityState, 120),
+          distanceKm: 4.5,
+          totalCapacityMt: Number(payload.totalCapacityMt),
+          availableCapacityMt: Number(payload.availableCapacityMt),
+          pricePerQuintalMonth: Number(payload.pricePerQuintalMonth),
+          rating: 4.8,
+          facilities: payload.facilities
+            .slice(0, 8)
+            .map((f) => sanitizeStr(f, 40)),
+          description: sanitizeStr(payload.description, 600),
+          status: "active",
+          mapX: 52,
+          mapY: 42,
+          isCatalog: false,
+        };
+        setDemoWarehouses((prev) => {
+          const next = [newItem, ...prev];
+          writeStoredDemoWarehouses(next);
+          return next;
+        });
         return;
       }
       try {
@@ -1905,12 +2271,69 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
 
+  const updateWarehouseListing: AuthContextValue["updateWarehouseListing"] =
+    async ({
+      warehouseId,
+      availableCapacityMt,
+      pricePerQuintalMonth,
+      status,
+    }) => {
+      if (!user) throw new Error("AUTH_REQUIRED");
+      const target = warehouses.find((w) => w.id === warehouseId);
+      if (!target) throw new Error("Warehouse not found.");
+      const check = validateWarehouseUpdateInput({
+        totalCapacityMt: target.totalCapacityMt,
+        availableCapacityMt,
+        pricePerQuintalMonth,
+      });
+      if (!check.valid) {
+        throw new Error(check.error || "Invalid warehouse update values.");
+      }
+
+      if (isDemoMode) {
+        setDemoWarehouses((prev) => {
+          const exists = prev.some((w) => w.id === warehouseId);
+          const updatedItem: WarehouseItem = {
+            ...target,
+            availableCapacityMt: Number(availableCapacityMt),
+            pricePerQuintalMonth: Number(pricePerQuintalMonth),
+            status,
+          };
+          const next = exists
+            ? prev.map((w) => (w.id === warehouseId ? updatedItem : w))
+            : [updatedItem, ...prev];
+          writeStoredDemoWarehouses(next);
+          return next;
+        });
+        return;
+      }
+
+      try {
+        await updateDoc(doc(db, "warehouses", warehouseId), {
+          availableCapacityMt: Number(availableCapacityMt),
+          pricePerQuintalMonth: Number(pricePerQuintalMonth),
+          status,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        handleFirestoreError(
+          err,
+          OperationType.UPDATE,
+          `warehouses/${warehouseId}`
+        );
+      }
+    };
+
   const submitSupportTicket: AuthContextValue["submitSupportTicket"] = async (
     payload
   ) => {
     if (!user) throw new Error("AUTH_REQUIRED");
-    const priority = payload.priority === "urgent" ? "urgent" : "normal";
+    const priority =
+      payload.category === "complaint" || payload.priority === "urgent"
+        ? "urgent"
+        : "normal";
     if (isDemoMode) {
+      const nowIso = new Date().toISOString();
       setDemoTickets((prev) => [
         {
           id: `ticket-${Date.now()}`,
@@ -1920,6 +2343,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           message: sanitizeStr(payload.message, 1000),
           priority,
           status: "open",
+          createdAtIso: nowIso,
+          updatedAtIso: nowIso,
         },
         ...prev,
       ]);
@@ -1954,12 +2379,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       100
     );
     if (isDemoMode) {
+      const nowIso = new Date().toISOString();
       setDemoTickets((prev) =>
         prev.map((t) => {
           if (t.id !== ticketId) return t;
           return {
             ...t,
             status,
+            updatedAtIso: nowIso,
             ...(priority ? { priority } : {}),
             ...(employeeReply !== undefined
               ? { employeeReply: sanitizeStr(employeeReply, 1000) }
@@ -2094,17 +2521,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const togglePsychiatristAvailability = async (available: boolean) => {
     if (!user) throw new Error("AUTH_REQUIRED");
+    const prefsMap = readPsychPrefsMap();
+    const nextPrefs = {
+      ...prefsMap,
+      [user.uid]: {
+        ...(prefsMap[user.uid] || {}),
+        availableForConsult: available,
+      },
+    };
+    writePsychPrefsMap(nextPrefs);
+
     if (isDemoMode) {
       setDemoPsychiatrists((prev) =>
         prev.map((p) =>
           p.userId === user.uid ? { ...p, availableForConsult: available } : p
         )
       );
-      setDemoUsers((prev) =>
-        prev.map((u) =>
+      setDemoUsers((prev) => {
+        const updated = prev.map((u) =>
           u.uid === user.uid ? { ...u, availableForConsult: available } : u
-        )
-      );
+        );
+        writeStoredLocalUsers(
+          updated.filter(
+            (u) =>
+              u.uid.startsWith("app_") ||
+              u.uid.startsWith("local-") ||
+              u.uid.startsWith("emp_")
+          )
+        );
+        return updated;
+      });
       return;
     }
 
@@ -2126,10 +2572,145 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updatePsychiatristSettings: AuthContextValue["updatePsychiatristSettings"] =
+    async (payload) => {
+      if (!user || !effectiveProfile) throw new Error("AUTH_REQUIRED");
+      const check = validatePsychiatristSettings(payload);
+      if (!check.valid) {
+        throw new Error(
+          check.error || "Please verify your consultation settings."
+        );
+      }
+      const clean = normalizePsychiatristSettings(payload);
+
+      const prefsMap = readPsychPrefsMap();
+      const updatedPatch: Partial<PsychiatristProfileItem> = {
+        availableForConsult: clean.availableForConsult,
+        languages: clean.languages,
+        experienceYears: clean.experienceYears,
+        bio: clean.bio,
+        consultMode: clean.consultMode,
+        sessionDurationMins: clean.sessionDurationMins,
+        preferredSlots: clean.preferredSlots,
+        ...(clean.qualification ? { qualification: clean.qualification } : {}),
+        ...(clean.specialization
+          ? { specialization: clean.specialization }
+          : {}),
+      };
+      writePsychPrefsMap({
+        ...prefsMap,
+        [user.uid]: {
+          ...(prefsMap[user.uid] || {}),
+          ...updatedPatch,
+        },
+      });
+
+      if (isDemoMode) {
+        setDemoPsychiatrists((prev) => {
+          const exists = prev.some((p) => p.userId === user.uid);
+          if (exists) {
+            return prev.map((p) =>
+              p.userId === user.uid ? { ...p, ...updatedPatch } : p
+            );
+          }
+          return [
+            {
+              id: user.uid,
+              userId: user.uid,
+              name: effectiveProfile.name,
+              qualification:
+                clean.qualification ||
+                effectiveProfile.qualification ||
+                "MD Psychiatry",
+              specialization:
+                clean.specialization ||
+                effectiveProfile.specialization ||
+                "Rural Stress & Farmer Well-Being",
+              languages: clean.languages,
+              experienceYears: clean.experienceYears,
+              state: effectiveProfile.state || "India",
+              bio: clean.bio,
+              availableForConsult: clean.availableForConsult,
+              consultMode: clean.consultMode,
+              sessionDurationMins: clean.sessionDurationMins,
+              preferredSlots: clean.preferredSlots,
+            },
+            ...prev,
+          ];
+        });
+
+        persistLocalUserProfile({
+          ...effectiveProfile,
+          availableForConsult: clean.availableForConsult,
+          ...(clean.qualification
+            ? { qualification: clean.qualification }
+            : {}),
+          ...(clean.specialization
+            ? { specialization: clean.specialization }
+            : {}),
+        });
+        return;
+      }
+
+      try {
+        await updateDoc(doc(db, "users", user.uid), {
+          availableForConsult: clean.availableForConsult,
+          ...(clean.qualification
+            ? { qualification: clean.qualification }
+            : {}),
+          ...(clean.specialization
+            ? { specialization: clean.specialization }
+            : {}),
+          updatedAt: serverTimestamp(),
+        });
+        await setDoc(
+          doc(db, "psychiatrists", user.uid),
+          {
+            userId: user.uid,
+            name: sanitizeStr(effectiveProfile.name, 100),
+            qualification: sanitizeStr(
+              clean.qualification ||
+                effectiveProfile.qualification ||
+                "MD Psychiatry",
+              100
+            ),
+            specialization: sanitizeStr(
+              clean.specialization ||
+                effectiveProfile.specialization ||
+                "Rural Stress & Farmer Well-Being",
+              120
+            ),
+            languages: clean.languages,
+            experienceYears: clean.experienceYears,
+            state: sanitizeStr(effectiveProfile.state || "India", 80),
+            bio: clean.bio || "Confidential consultation specialist on BhoomiBandhu.",
+            availableForConsult: clean.availableForConsult,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch (err) {
+        handleFirestoreError(
+          err,
+          OperationType.UPDATE,
+          `psychiatrists/${user.uid}`
+        );
+      }
+    };
+
   const addPartnerCompany: AuthContextValue["addPartnerCompany"] = async (
     payload
   ) => {
     if (!user || !isAdmin) throw new Error("ADMIN_REQUIRED");
+    const rawWebsite = payload.websiteUrl?.trim() || "";
+    const safeWebsite = rawWebsite ? getSafeExternalUrl(rawWebsite) : null;
+    if (rawWebsite && !safeWebsite) {
+      throw new Error(
+        "Please enter a valid http:// or https:// website URL."
+      );
+    }
+
     if (isDemoMode) {
       setDemoCompanies((prev) => [
         {
@@ -2140,9 +2721,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           coverageOrLimit: sanitizeStr(payload.coverageOrLimit, 120),
           eligibilitySummary: sanitizeStr(payload.eligibilitySummary, 300),
           contactHelpline: sanitizeStr(payload.contactHelpline, 60),
-          websiteUrl: payload.websiteUrl?.trim()
-            ? sanitizeStr(payload.websiteUrl, 200)
-            : undefined,
+          websiteUrl: safeWebsite ? sanitizeStr(safeWebsite, 200) : undefined,
           status: "active",
           createdBy: user.uid,
         },
@@ -2159,9 +2738,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         coverageOrLimit: sanitizeStr(payload.coverageOrLimit, 120),
         eligibilitySummary: sanitizeStr(payload.eligibilitySummary, 300),
         contactHelpline: sanitizeStr(payload.contactHelpline, 60),
-        ...(payload.websiteUrl?.trim()
-          ? { websiteUrl: sanitizeStr(payload.websiteUrl, 200) }
-          : {}),
+        ...(safeWebsite ? { websiteUrl: sanitizeStr(safeWebsite, 200) } : {}),
         status: "active",
         createdBy: user.uid,
         createdAt: serverTimestamp(),
@@ -2332,7 +2909,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (isDemoMode) {
-        const newUid = `support-emp-${Date.now()}`;
+        const newUid = `emp_${Date.now()}`;
         const cred: DemoAccountCredential = {
           id: newUid,
           role: "support_staff",
@@ -2350,6 +2927,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           summary:
             "Admin-provisioned Support Desk employee (must update password on first login).",
         };
+
+        await fetch("/api/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: newUid,
+            name: cleanName,
+            email: cleanEmail,
+            password: tempPassword,
+            role: "support_staff",
+            state: "India",
+            district: "",
+            department: cleanDept,
+            mustChangePassword: true,
+          }),
+        }).catch(() => undefined);
+
+        const { password: _unusedPwd, ...credSafe } = cred;
+        const localRec = await createLocalAuthRecord(
+          credSafe,
+          tempPassword,
+          true
+        );
+        writeLocalAuthRecords([
+          localRec,
+          ...readLocalAuthRecords().filter(
+            (r) => r.credential.email.toLowerCase() !== cleanEmail
+          ),
+        ]);
 
         const empRecord: SupportEmployeeRecord = {
           id: newUid,
@@ -2379,35 +2985,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
 
         setDemoProvisionedAccounts((prev) => [cred, ...prev]);
-        setDemoUsers((prev) => [
-          {
-            uid: newUid,
-            name: cleanName,
-            email: cleanEmail,
-            role: "support_staff",
-            phone: "",
-            state: "India",
-            district: "",
-            landSizeAcres: 0,
-            primaryCrops: [],
-            department: cleanDept,
-            notificationsEnabled: true,
-            mustChangePassword: true,
-          },
-          ...prev,
-        ]);
+        persistLocalUserProfile({
+          uid: newUid,
+          name: cleanName,
+          email: cleanEmail,
+          role: "support_staff",
+          phone: "",
+          state: "India",
+          district: "",
+          landSizeAcres: 0,
+          primaryCrops: [],
+          department: cleanDept,
+          notificationsEnabled: true,
+          mustChangePassword: true,
+        });
         setDemoSupportEmployees((prev) => [empRecord, ...prev]);
         setDemoMailOutbox((prev) => [outboxRecord, ...prev]);
 
         return { employee: empRecord, emailRecord: outboxRecord };
       }
 
-      // Live Firebase mode: create Firebase Auth user via secondary app so Admin stays signed in
+      // Live Firebase mode: register scrypt auth credentials + Firestore records
+      let newUid = `emp_${Date.now()}`;
       const secondaryApp = initializeApp(
         firebaseConfig,
         `bhoomi-emp-provision-${Date.now()}`
       );
-      let newUid = "";
       try {
         const secondaryAuth = getAuth(secondaryApp);
         const cred = await createUserWithEmailAndPassword(
@@ -2419,12 +3022,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         newUid = cred.user.uid;
         await signOut(secondaryAuth);
       } catch (err) {
-        if (isOperationNotAllowed(err)) {
-          throw new Error(
-            "Enable Email/Password in Firebase Console (Authentication > Sign-in method) to create live employee passwords, or use the Admin Sandbox Preview profile to test onboarding right now."
-          );
+        if (!isOperationNotAllowed(err)) {
+          throw err;
         }
-        throw err;
+        await fetch("/api/auth/register", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+          },
+          body: JSON.stringify({
+            id: newUid,
+            name: cleanName,
+            email: cleanEmail,
+            password: tempPassword,
+            role: "support_staff",
+            state: "India",
+            district: "",
+            department: cleanDept,
+            mustChangePassword: true,
+          }),
+        }).catch(() => undefined);
+
+        const localRec = await createLocalAuthRecord(
+          {
+            id: newUid,
+            role: "support_staff",
+            label: "Support Employee",
+            badge: "Support Staff",
+            name: cleanName,
+            email: cleanEmail,
+            state: "India",
+            district: "",
+            phone: "",
+            landSizeAcres: 0,
+            primaryCrops: [],
+            department: cleanDept,
+            summary:
+              "Admin-provisioned Support Desk employee (must update password on first login).",
+          },
+          tempPassword,
+          true
+        );
+        writeLocalAuthRecords([
+          localRec,
+          ...readLocalAuthRecords().filter(
+            (r) => r.credential.email.toLowerCase() !== cleanEmail
+          ),
+        ]);
       } finally {
         await deleteApp(secondaryApp);
       }
@@ -2526,19 +3171,75 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (isDemoMode) {
+        const changeRes = await fetch("/api/auth/change-password", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(serverSessionTokenRef.current
+              ? { Authorization: `Bearer ${serverSessionTokenRef.current}` }
+              : {}),
+          },
+          body: JSON.stringify({
+            email: effectiveProfile.email,
+            ...(currentDemoCred?.password
+              ? { currentPassword: currentDemoCred.password }
+              : {}),
+            newPassword,
+          }),
+        }).catch(() => null);
+        if (changeRes?.ok) {
+          const changeData = (await changeRes.json().catch(() => ({}))) as {
+            sessionToken?: string;
+          };
+          if (
+            typeof changeData.sessionToken === "string" &&
+            changeData.sessionToken
+          ) {
+            serverSessionTokenRef.current = changeData.sessionToken;
+          }
+        }
+
+        const existingLocal = readLocalAuthRecords();
+        const existingRec = existingLocal.find(
+          (r) =>
+            r.credential.email.toLowerCase() ===
+            effectiveProfile.email.toLowerCase()
+        );
+        if (existingRec) {
+          const updatedRec = await createLocalAuthRecord(
+            existingRec.credential,
+            newPassword,
+            false
+          );
+          writeLocalAuthRecords([
+            updatedRec,
+            ...existingLocal.filter(
+              (r) =>
+                r.credential.email.toLowerCase() !==
+                effectiveProfile.email.toLowerCase()
+            ),
+          ]);
+        }
+
         setDemoProvisionedAccounts((prev) =>
           prev.map((a) =>
             a.id === user.uid ? { ...a, password: newPassword } : a
           )
         );
-        setDemoAccount((prev) =>
-          prev && prev.id === user.uid ? { ...prev, password: newPassword } : prev
-        );
-        setDemoUsers((prev) =>
-          prev.map((u) =>
+        setDemoUsers((prev) => {
+          const updated = prev.map((u) =>
             u.uid === user.uid ? { ...u, mustChangePassword: false } : u
-          )
-        );
+          );
+          writeStoredLocalUsers(
+            updated.filter(
+              (u) =>
+                u.uid.startsWith("app_") ||
+                u.uid.startsWith("local-") ||
+                u.uid.startsWith("emp_")
+            )
+          );
+          return updated;
+        });
         setDemoSupportEmployees((prev) =>
           prev.map((emp) =>
             emp.uid === user.uid
@@ -2618,11 +3319,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         createWarehouseBooking,
         updateBookingStatus,
         createWarehouseListing,
+        updateWarehouseListing,
         submitSupportTicket,
         updateSupportTicket,
         bookPsychiatristSession,
         updateConsultationStatus,
         togglePsychiatristAvailability,
+        updatePsychiatristSettings,
         addPartnerCompany,
         togglePartnerCompanyStatus,
         deletePartnerCompany,

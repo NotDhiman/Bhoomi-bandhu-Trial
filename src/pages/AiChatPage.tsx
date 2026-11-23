@@ -39,7 +39,7 @@ export function AiChatPage() {
   const { user } = useAuth();
   const { currentLanguage, t } = useLanguage();
 
-  const [mode, setMode] = useState<ChatMode>("balanced");
+  const [mode, setMode] = useState<ChatMode>("fast");
   const [input, setInput] = useState(initialPrompt);
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
     {
@@ -75,12 +75,15 @@ export function AiChatPage() {
     setInput("");
     setSending(true);
 
+    const modelMsgId = `m-${Date.now()}`;
+    let streamedReply = "";
+
     try {
       const apiMessages = nextHistory
         .filter((m) => m.id !== "welcome")
         .map((m) => ({ role: m.role, text: m.text }));
 
-      const res = await fetch("/api/chat", {
+      const res = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -90,30 +93,81 @@ export function AiChatPage() {
         }),
       });
 
-      const data = (await res.json()) as {
-        reply?: string;
-        error?: string;
-      };
+      const contentType = res.headers.get("content-type") || "";
+      if (!res.ok || !contentType.includes("text/event-stream") || !res.body) {
+        let errText = "Could not get a response from BhoomiBandhu AI.";
+        try {
+          const errJson = (await res.json()) as { error?: string; reply?: string };
+          if (res.ok && errJson.reply) {
+            streamedReply = errJson.reply;
+          } else if (errJson.error) {
+            errText = errJson.error;
+          }
+        } catch {
+          // ignore JSON parse failure
+        }
+        if (!streamedReply) {
+          throw new Error(errText);
+        }
+      } else {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
 
-      if (!res.ok || !data.reply) {
-        throw new Error(
-          data.error || "Could not get a response from BhoomiBandhu AI."
-        );
+        setMessages([
+          ...nextHistory,
+          { id: modelMsgId, role: "model", text: "", mode },
+        ]);
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const events = buffer.split("\n\n");
+          buffer = events.pop() || "";
+
+          for (const evt of events) {
+            const line = evt
+              .split("\n")
+              .find((l) => l.startsWith("data: "));
+            if (!line) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr) continue;
+            const parsed = JSON.parse(jsonStr) as {
+              chunk?: string;
+              error?: string;
+              done?: boolean;
+            };
+            if (parsed.error) {
+              throw new Error(parsed.error);
+            }
+            if (parsed.chunk) {
+              streamedReply += parsed.chunk;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === modelMsgId ? { ...m, text: streamedReply } : m
+                )
+              );
+            }
+          }
+        }
       }
 
-      const modelMsg: ChatMessage = {
-        id: `m-${Date.now()}`,
-        role: "model",
-        text: data.reply,
-        mode,
-      };
-      const updated = [...nextHistory, modelMsg];
-      setMessages(updated);
+      if (!streamedReply.trim()) {
+        throw new Error("Could not get a response from BhoomiBandhu AI.");
+      }
+
+      const finalMessages: ChatMessage[] = [
+        ...nextHistory,
+        { id: modelMsgId, role: "model", text: streamedReply, mode },
+      ];
+      setMessages(finalMessages);
 
       // Persist snapshot for signed-in Firebase users
       if (user && !user.isDemoSession) {
         try {
-          const compactMessages = updated
+          const compactMessages = finalMessages
             .filter((m) => m.id !== "welcome")
             .slice(-20)
             .map((m) => ({ role: m.role, text: m.text.slice(0, 1500) }));
@@ -130,6 +184,9 @@ export function AiChatPage() {
         }
       }
     } catch (err) {
+      if (!streamedReply.trim()) {
+        setMessages(nextHistory);
+      }
       setError(
         err instanceof Error
           ? err.message

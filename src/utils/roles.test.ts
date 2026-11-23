@@ -22,11 +22,11 @@ test("getDefaultRouteForRole directs each role to its primary workspace", () => 
   assert.equal(getDefaultRouteForRole("farmer", true), "/admin");
   assert.equal(getDefaultRouteForRole("psychiatrist", false), "/psychiatrist");
   assert.equal(getDefaultRouteForRole("support_staff", false), "/support-desk");
-  assert.equal(getDefaultRouteForRole("warehouse_owner", false), "/warehouses");
+  assert.equal(getDefaultRouteForRole("warehouse_owner", false), "/");
   assert.equal(getDefaultRouteForRole("farmer", false), "/");
 });
 
-test("canAccessRoute enforces strict role isolation for admin, psychiatrist, and support-desk", () => {
+test("canAccessRoute enforces strict role isolation for admin, psychiatrist, warehouse_owner, and support-desk", () => {
   assert.equal(canAccessRoute("farmer", false, "/admin"), false);
   assert.equal(canAccessRoute("farmer", true, "/admin"), true);
   assert.equal(canAccessRoute("farmer", true, "/psychiatrist"), true);
@@ -37,7 +37,14 @@ test("canAccessRoute enforces strict role isolation for admin, psychiatrist, and
   assert.equal(canAccessRoute("farmer", true, "/warehouses"), false);
   assert.equal(canAccessRoute("farmer", false, "/psychiatrist"), false);
   assert.equal(canAccessRoute("psychiatrist", false, "/psychiatrist"), true);
+  assert.equal(canAccessRoute("psychiatrist", false, "/wellbeing"), false);
+  assert.equal(canAccessRoute("farmer", false, "/wellbeing"), true);
   assert.equal(canAccessRoute("warehouse_owner", false, "/support-desk"), false);
+  assert.equal(canAccessRoute("warehouse_owner", false, "/schemes"), false);
+  assert.equal(canAccessRoute("warehouse_owner", false, "/crop-advisor"), false);
+  assert.equal(canAccessRoute("warehouse_owner", false, "/loans"), true);
+  assert.equal(canAccessRoute("warehouse_owner", false, "/insurance"), true);
+  assert.equal(canAccessRoute("warehouse_owner", false, "/warehouses"), true);
   assert.equal(canAccessRoute("support_staff", false, "/support-desk"), true);
   assert.equal(canAccessRoute("farmer", false, "/schemes"), true);
 });

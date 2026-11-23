@@ -1,10 +1,14 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  AlertTriangle,
   ArrowRight,
   BookOpen,
+  CheckCircle2,
+  Clock,
   Compass,
   FileCheck2,
+  Flag,
   HeartHandshake,
   HelpCircle,
   Landmark,
@@ -18,6 +22,12 @@ import { useLanguage } from "../context/LanguageContext";
 import { SCHEMES_DATA } from "../data/bhoomiData";
 import type { TranslationKey } from "../i18n/translations";
 import { getRoleDisplayLabel } from "../utils/roles";
+import {
+  formatComplaintTimestamp,
+  getComplaintProgressStage,
+  getFarmerComplaints,
+  isActiveComplaint,
+} from "../utils/supportTicketStats";
 
 interface ServiceCardDef {
   to: string;
@@ -78,14 +88,38 @@ const SERVICE_CARDS: ServiceCardDef[] = [
 ];
 
 export function DashboardPage() {
-  const { user, profile, isAdmin, savedSchemes, bookings } = useAuth();
+  const { user, profile, isAdmin, savedSchemes, bookings, supportTickets } =
+    useAuth();
   const { t } = useLanguage();
+  const [complaintFilter, setComplaintFilter] = useState<
+    "all" | "active" | "resolved"
+  >("all");
 
   const displayName = user
     ? profile?.name?.split(" ")[0] || "Friend"
     : "Kisan Friend";
 
   const featuredScheme = SCHEMES_DATA[0];
+
+  const allFarmerComplaints = useMemo(
+    () => getFarmerComplaints(supportTickets),
+    [supportTickets]
+  );
+
+  const activeComplaintsCount = useMemo(
+    () => allFarmerComplaints.filter((c) => isActiveComplaint(c)).length,
+    [allFarmerComplaints]
+  );
+
+  const visibleComplaints = useMemo(() => {
+    if (complaintFilter === "active") {
+      return allFarmerComplaints.filter((c) => c.status !== "resolved");
+    }
+    if (complaintFilter === "resolved") {
+      return allFarmerComplaints.filter((c) => c.status === "resolved");
+    }
+    return allFarmerComplaints;
+  }, [allFarmerComplaints, complaintFilter]);
 
   const recentItems = [
     ...savedSchemes.slice(0, 2).map((s) => ({
@@ -211,6 +245,235 @@ export function DashboardPage() {
             );
           })}
         </div>
+      </section>
+
+      {/* My Complaints Tracker */}
+      <section
+        aria-labelledby="my-complaints-heading"
+        className="bg-white rounded-2xl border border-[#2D6A4F]/15 p-5 md:p-6 space-y-4"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div
+              className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                activeComplaintsCount > 0
+                  ? "bg-red-50 text-red-700"
+                  : "bg-[#EAF4EE] text-[#2D6A4F]"
+              }`}
+            >
+              <Flag className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2
+                  id="my-complaints-heading"
+                  className="text-lg md:text-xl font-display font-semibold text-[#1B2A20]"
+                >
+                  My Complaints
+                </h2>
+                {user && allFarmerComplaints.length > 0 && (
+                  <span className="text-xs font-semibold text-[#4A5A4F] tabular-nums">
+                    ({allFarmerComplaints.length} total
+                    {activeComplaintsCount > 0
+                      ? ` · ${activeComplaintsCount} active priority`
+                      : ""}
+                    )
+                  </span>
+                )}
+              </div>
+              <p className="text-xs sm:text-sm text-[#4A5A4F] mt-0.5">
+                Track progress, officer replies, and timestamps for every
+                complaint you have filed.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {user && allFarmerComplaints.length > 0 && (
+              <div
+                role="tablist"
+                aria-label="Filter my complaints"
+                className="inline-flex rounded-xl bg-[#FAF8F3] p-1 border border-[#2D6A4F]/15"
+              >
+                {(
+                  [
+                    { id: "all", label: "All" },
+                    { id: "active", label: "Active" },
+                    { id: "resolved", label: "Resolved" },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={complaintFilter === tab.id}
+                    onClick={() => setComplaintFilter(tab.id)}
+                    className={`min-h-[34px] px-3 rounded-lg text-xs font-semibold transition-colors ${
+                      complaintFilter === tab.id
+                        ? "bg-[#2D6A4F] text-white"
+                        : "text-[#4A5A4F] hover:text-[#1B2A20]"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <Link
+              to="/help?tab=complaint"
+              className="min-h-[40px] px-4 rounded-xl bg-red-50 border border-red-200 hover:bg-red-100 text-red-800 font-semibold text-xs inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+            >
+              <Flag className="w-3.5 h-3.5" />
+              <span>Register a Complaint</span>
+            </Link>
+          </div>
+        </div>
+
+        {!user ? (
+          <div className="p-4 rounded-xl bg-[#FAF8F3] border border-[#2D6A4F]/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="text-sm text-[#4A5A4F]">
+              Sign in to view your previously filed complaints, live review
+              timestamps, and resolution updates.
+            </p>
+            <Link
+              to="/auth"
+              className="min-h-[40px] px-4 rounded-xl bg-[#E9A23B] hover:bg-[#DC9428] text-[#1B2A20] font-semibold text-xs inline-flex items-center gap-1.5 self-start sm:self-auto shrink-0 transition-colors"
+            >
+              <span>Sign In to Track</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+        ) : visibleComplaints.length === 0 ? (
+          <div className="p-5 rounded-xl bg-[#FAF8F3] border border-[#2D6A4F]/10 text-center space-y-2">
+            <p className="text-sm font-medium text-[#1B2A20]">
+              {allFarmerComplaints.length === 0
+                ? "You have not filed any complaints yet."
+                : `No ${complaintFilter} complaints found.`}
+            </p>
+            <p className="text-xs text-[#4A5A4F]">
+              Facing an issue with a warehouse, subsidy, loan, or insurance
+              claim? File a priority complaint anytime.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {visibleComplaints.map((complaint) => {
+              const active = isActiveComplaint(complaint);
+              const stage = getComplaintProgressStage(complaint.status);
+              const filedAt = formatComplaintTimestamp(complaint.createdAtIso);
+              const updatedAt = formatComplaintTimestamp(
+                complaint.updatedAtIso || complaint.createdAtIso
+              );
+
+              return (
+                <article
+                  key={complaint.id}
+                  className={`rounded-xl p-4 space-y-3 ${
+                    active
+                      ? "bg-red-50/45 border-2 border-red-300"
+                      : "bg-[#FAF8F3] border border-[#2D6A4F]/20"
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-wide">
+                        {active ? (
+                          <span className="inline-flex items-center gap-1 text-red-800">
+                            <AlertTriangle className="w-3.5 h-3.5 text-red-700 shrink-0" />
+                            <span>{stage.statusLabel}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[#2D6A4F]">
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>{stage.statusLabel}</span>
+                          </span>
+                        )}
+                        <span className="text-[#4A5A4F] font-medium normal-case tracking-normal">
+                          · Ref {complaint.id.slice(0, 14)}
+                        </span>
+                      </div>
+                      <h3 className="font-display font-semibold text-base text-[#1B2A20]">
+                        {complaint.subject}
+                      </h3>
+                    </div>
+
+                    <div className="text-xs text-[#4A5A4F] flex flex-col sm:items-end gap-0.5 tabular-nums shrink-0">
+                      <span className="inline-flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>Filed: {filedAt}</span>
+                      </span>
+                      <span className="text-[11px]">
+                        Last updated: {updatedAt}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-sm text-[#4A5A4F] leading-relaxed">
+                    {complaint.message}
+                  </p>
+
+                  {/* 3-Step Progress Bar */}
+                  <div
+                    aria-label={`Complaint progress: step ${stage.step} of 3 (${stage.label})`}
+                    className="space-y-1.5 pt-1"
+                  >
+                    <div className="grid grid-cols-3 gap-2">
+                      {(
+                        [
+                          { step: 1, label: "1. Filed" },
+                          { step: 2, label: "2. In Review" },
+                          { step: 3, label: "3. Resolved" },
+                        ] as const
+                      ).map((item) => {
+                        const reached = stage.step >= item.step;
+                        return (
+                          <div key={item.step} className="space-y-1">
+                            <div
+                              className={`h-1.5 rounded-full ${
+                                reached
+                                  ? active
+                                    ? "bg-red-600"
+                                    : "bg-[#2D6A4F]"
+                                  : "bg-[#E2DDD2]"
+                              }`}
+                            />
+                            <p
+                              className={`text-[11px] font-semibold ${
+                                reached
+                                  ? active
+                                    ? "text-red-900"
+                                    : "text-[#2D6A4F]"
+                                  : "text-[#6B7A6F]"
+                              }`}
+                            >
+                              {item.label}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-[#4A5A4F]">
+                      {stage.description}
+                      {complaint.assignedEmployeeName
+                        ? ` · Officer: ${complaint.assignedEmployeeName}`
+                        : ""}
+                    </p>
+                  </div>
+
+                  {complaint.employeeReply && (
+                    <div className="p-3 rounded-lg bg-[#EAF4EE] border border-[#2D6A4F]/15 text-xs text-[#1B2A20]">
+                      <strong className="text-[#2D6A4F]">
+                        {complaint.assignedEmployeeName || "Support Team"}:
+                      </strong>{" "}
+                      {complaint.employeeReply}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {/* Recent Activity & Quick Actions */}

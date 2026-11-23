@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { SCHEMES_DATA } from "../data/bhoomiData";
 import { useAuth } from "../context/AuthContext";
+import { getSafeExternalUrl } from "../utils/safeUrl";
 
 export function SchemeDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -159,15 +160,17 @@ export function SchemeDetailPage() {
 
       {/* Action Buttons */}
       <div className="flex flex-col sm:flex-row gap-3 pt-2">
-        <a
-          href={scheme.officialUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex-1 min-h-[48px] px-6 rounded-xl bg-[#E9A23B] hover:bg-[#DC9428] text-[#1B2A20] font-semibold text-sm flex items-center justify-center gap-2 transition-colors"
-        >
-          <span>Visit Official Application Page</span>
-          <ExternalLink className="w-4 h-4" />
-        </a>
+        {getSafeExternalUrl(scheme.officialUrl) && (
+          <a
+            href={getSafeExternalUrl(scheme.officialUrl)!}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 min-h-[48px] px-6 rounded-xl bg-[#E9A23B] hover:bg-[#DC9428] text-[#1B2A20] font-semibold text-sm flex items-center justify-center gap-2 transition-colors"
+          >
+            <span>Visit Official Application Page</span>
+            <ExternalLink className="w-4 h-4" />
+          </a>
+        )}
 
         <button
           type="button"

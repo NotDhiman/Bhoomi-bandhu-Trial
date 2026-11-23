@@ -12,6 +12,7 @@ import { Layout } from "./components/Layout";
 import { SplashOnboardingPage } from "./pages/SplashOnboardingPage";
 import { AuthPage } from "./pages/AuthPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { WarehouseOwnerDashboardPage } from "./pages/WarehouseOwnerDashboardPage";
 import { ServicesHubPage } from "./pages/ServicesHubPage";
 import { SearchPage } from "./pages/SearchPage";
 import { SchemesPage } from "./pages/SchemesPage";
@@ -105,19 +106,63 @@ function AppRoutes() {
                       <Navigate to="/psychiatrist" replace />
                     ) : profile?.role === "support_staff" ? (
                       <Navigate to="/support-desk" replace />
+                    ) : profile?.role === "warehouse_owner" ? (
+                      <WarehouseOwnerDashboardPage />
                     ) : (
                       <DashboardPage />
                     )
                   }
                 />
-                <Route path="/dashboard" element={<DashboardPage />} />
-                <Route path="/services" element={<ServicesHubPage />} />
+                <Route
+                  path="/dashboard"
+                  element={
+                    profile?.role === "warehouse_owner" ? (
+                      <WarehouseOwnerDashboardPage />
+                    ) : (
+                      <DashboardPage />
+                    )
+                  }
+                />
+                <Route
+                  path="/services"
+                  element={
+                    profile?.role === "warehouse_owner" ? (
+                      <Navigate to="/" replace />
+                    ) : (
+                      <ServicesHubPage />
+                    )
+                  }
+                />
                 <Route path="/search" element={<SearchPage />} />
-                <Route path="/schemes" element={<SchemesPage />} />
-                <Route path="/schemes/:id" element={<SchemeDetailPage />} />
+                <Route
+                  path="/schemes"
+                  element={
+                    profile?.role === "warehouse_owner" ? (
+                      <Navigate to="/" replace />
+                    ) : (
+                      <SchemesPage />
+                    )
+                  }
+                />
+                <Route
+                  path="/schemes/:id"
+                  element={
+                    profile?.role === "warehouse_owner" ? (
+                      <Navigate to="/" replace />
+                    ) : (
+                      <SchemeDetailPage />
+                    )
+                  }
+                />
                 <Route
                   path="/eligibility"
-                  element={<EligibilityCheckerPage />}
+                  element={
+                    profile?.role === "warehouse_owner" ? (
+                      <Navigate to="/" replace />
+                    ) : (
+                      <EligibilityCheckerPage />
+                    )
+                  }
                 />
                 <Route path="/warehouses" element={<WarehousesPage />} />
                 <Route
@@ -130,9 +175,38 @@ function AppRoutes() {
                 />
                 <Route path="/insurance" element={<InsurancePage />} />
                 <Route path="/loans" element={<LoansPage />} />
-                <Route path="/crop-advisor" element={<CropAdvisorPage />} />
-                <Route path="/chat" element={<AiChatPage />} />
-                <Route path="/wellbeing" element={<WellBeingPage />} />
+                <Route
+                  path="/crop-advisor"
+                  element={
+                    profile?.role === "warehouse_owner" ? (
+                      <Navigate to="/" replace />
+                    ) : (
+                      <CropAdvisorPage />
+                    )
+                  }
+                />
+                <Route
+                  path="/chat"
+                  element={
+                    profile?.role === "warehouse_owner" ? (
+                      <Navigate to="/" replace />
+                    ) : (
+                      <AiChatPage />
+                    )
+                  }
+                />
+                <Route
+                  path="/wellbeing"
+                  element={
+                    profile?.role === "psychiatrist" ? (
+                      <Navigate to="/psychiatrist" replace />
+                    ) : profile?.role === "warehouse_owner" ? (
+                      <Navigate to="/" replace />
+                    ) : (
+                      <WellBeingPage />
+                    )
+                  }
+                />
                 <Route
                   path="/psychiatrist"
                   element={<PsychiatristPortalPage />}

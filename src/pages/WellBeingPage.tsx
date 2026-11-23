@@ -256,12 +256,27 @@ export function WellBeingPage() {
                 <p className="text-[11px] text-[#4A5A4F]">
                   Languages: {doc.languages.join(", ")} · {doc.state}
                 </p>
+                <p className="text-[11px] font-medium text-[#2D6A4F]">
+                  {doc.consultMode || "Audio & Video"} ·{" "}
+                  {doc.sessionDurationMins || 30} mins
+                </p>
               </div>
               <button
                 type="button"
                 disabled={!doc.availableForConsult}
                 onClick={() => {
+                  const defaultSlots = [
+                    "Today · 6:00 PM - 6:30 PM",
+                    "Tomorrow · 11:00 AM - 11:30 AM",
+                    "Tomorrow · 5:00 PM - 5:30 PM",
+                    "Weekend · 10:30 AM - 11:00 AM",
+                  ];
+                  const activeSlots =
+                    doc.preferredSlots && doc.preferredSlots.length > 0
+                      ? doc.preferredSlots
+                      : defaultSlots;
                   setSelectedDoctor(doc);
+                  setPreferredSlot(activeSlots[0]);
                   setConsultLang(doc.languages[0] || "Hindi");
                   setConsultError("");
                 }}
@@ -310,18 +325,20 @@ export function WellBeingPage() {
                   onChange={(e) => setPreferredSlot(e.target.value)}
                   className="w-full h-11 px-3 rounded-xl bg-white border border-[#2D6A4F]/25 text-sm"
                 >
-                  <option value="Today · 6:00 PM - 6:30 PM">
-                    Today · 6:00 PM - 6:30 PM
-                  </option>
-                  <option value="Tomorrow · 11:00 AM - 11:30 AM">
-                    Tomorrow · 11:00 AM - 11:30 AM
-                  </option>
-                  <option value="Tomorrow · 5:00 PM - 5:30 PM">
-                    Tomorrow · 5:00 PM - 5:30 PM
-                  </option>
-                  <option value="Weekend · 10:30 AM - 11:00 AM">
-                    Weekend · 10:30 AM - 11:00 AM
-                  </option>
+                  {(selectedDoctor.preferredSlots &&
+                  selectedDoctor.preferredSlots.length > 0
+                    ? selectedDoctor.preferredSlots
+                    : [
+                        "Today · 6:00 PM - 6:30 PM",
+                        "Tomorrow · 11:00 AM - 11:30 AM",
+                        "Tomorrow · 5:00 PM - 5:30 PM",
+                        "Weekend · 10:30 AM - 11:00 AM",
+                      ]
+                  ).map((slot) => (
+                    <option key={slot} value={slot}>
+                      {slot}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>

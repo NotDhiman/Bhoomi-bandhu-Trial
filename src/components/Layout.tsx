@@ -61,12 +61,15 @@ const ALL_MODULES: NavItem[] = [
   },
   { to: "/schemes", labelKey: "nav.schemes", icon: BookOpen, roles: ["farmer"] },
   { to: "/eligibility", labelKey: "nav.eligibility", icon: FileCheck2, roles: ["farmer"] },
-  { to: "/warehouses", labelKey: "nav.warehouses", icon: Warehouse, roles: ["farmer", "warehouse_owner"] },
+  { to: "/warehouses", labelKey: "nav.warehouses", icon: Warehouse, roles: ["farmer"] },
+  { to: "/warehouses", customLabel: "My Warehouses", icon: Warehouse, roles: ["warehouse_owner"] },
   { to: "/insurance", labelKey: "nav.insurance", icon: Shield, roles: ["farmer"] },
-  { to: "/loans", labelKey: "nav.loans", icon: Landmark, roles: ["farmer", "warehouse_owner"] },
+  { to: "/insurance", customLabel: "Facility Insurance", icon: Shield, roles: ["warehouse_owner"] },
+  { to: "/loans", labelKey: "nav.loans", icon: Landmark, roles: ["farmer"] },
+  { to: "/loans", customLabel: "Commercial Loans", icon: Landmark, roles: ["warehouse_owner"] },
   { to: "/crop-advisor", labelKey: "nav.cropAdvisor", icon: Compass, roles: ["farmer"] },
   { to: "/chat", labelKey: "nav.chat", icon: MessageSquare, roles: ["farmer"] },
-  { to: "/wellbeing", labelKey: "nav.wellbeing", icon: HeartHandshake, roles: ["farmer", "psychiatrist"] },
+  { to: "/wellbeing", labelKey: "nav.wellbeing", icon: HeartHandshake, roles: ["farmer"] },
   { to: "/notifications", labelKey: "nav.notifications", icon: Bell },
   { to: "/help", labelKey: "nav.help", icon: HelpCircle },
   { to: "/profile", labelKey: "nav.profile", icon: User },
@@ -128,7 +131,7 @@ export function Layout({ children }: { children: ReactNode }) {
     : activeRole === "psychiatrist"
     ? [
         { to: "/psychiatrist", label: "Desk", icon: Stethoscope },
-        { to: "/wellbeing", label: "Care", icon: HeartHandshake },
+        { to: "/notifications", label: "Alerts", icon: Bell },
         { to: "/help", label: "Help", icon: HelpCircle },
         { to: "/profile", label: t("nav.profileTab"), icon: User },
       ]
@@ -137,6 +140,13 @@ export function Layout({ children }: { children: ReactNode }) {
         { to: "/support-desk", label: "Tickets", icon: Headphones },
         { to: "/help", label: "FAQs", icon: HelpCircle },
         { to: "/notifications", label: "Alerts", icon: Bell },
+        { to: "/profile", label: t("nav.profileTab"), icon: User },
+      ]
+    : activeRole === "warehouse_owner"
+    ? [
+        { to: "/", label: "Dashboard", icon: Home },
+        { to: "/warehouses", label: "Godowns", icon: Warehouse },
+        { to: "/loans", label: "Loans", icon: Landmark },
         { to: "/profile", label: t("nav.profileTab"), icon: User },
       ]
     : [
@@ -280,7 +290,11 @@ export function Layout({ children }: { children: ReactNode }) {
                   type="search"
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
-                  placeholder={t("header.searchPlaceholder")}
+                  placeholder={
+                    activeRole === "warehouse_owner"
+                      ? "Search warehouse loans, facility insurance, godowns..."
+                      : t("header.searchPlaceholder")
+                  }
                   className="w-full h-10 pl-9 pr-3 rounded-xl bg-white border border-[#2D6A4F]/20 text-sm text-[#1B2A20] placeholder:text-[#4A5A4F]/75 focus:outline-none focus:ring-2 focus:ring-[#2D6A4F]/30"
                 />
               </div>

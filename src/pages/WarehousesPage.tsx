@@ -11,6 +11,8 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { INDIAN_STATES } from "../data/bhoomiData";
+import { filterWarehousesForRegion } from "../utils/warehouseFilter";
 
 export function WarehousesPage() {
   const {
@@ -20,9 +22,14 @@ export function WarehousesPage() {
     ownerIncomingBookings,
     updateBookingStatus,
     createWarehouseListing,
+    updateWarehouseListing,
   } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [regionFilter, setRegionFilter] = useState<string>(
+    profile?.state?.trim() || "All India"
+  );
+  const [userEditedRegion, setUserEditedRegion] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "map">("list");
   const [selectedPinId, setSelectedPinId] = useState<string>(
     warehouses[0]?.id || ""
@@ -37,6 +44,12 @@ export function WarehousesPage() {
     }
   }, [profile?.role]);
 
+  useEffect(() => {
+    if (!userEditedRegion && profile?.state?.trim()) {
+      setRegionFilter(profile.state.trim());
+    }
+  }, [profile?.state, userEditedRegion]);
+
   // Owner add warehouse form
   const [showAddForm, setShowAddForm] = useState(false);
   const [whName, setWhName] = useState("");
@@ -48,18 +61,16 @@ export function WarehousesPage() {
   const [whSaving, setWhSaving] = useState(false);
   const [whError, setWhError] = useState("");
 
-  const filteredWarehouses = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return warehouses.filter((w) => {
-      if (w.status !== "active") return false;
-      if (!q) return true;
-      return (
-        w.name.toLowerCase().includes(q) ||
-        w.cityState.toLowerCase().includes(q) ||
-        w.facilities.some((f) => f.toLowerCase().includes(q))
-      );
-    });
-  }, [warehouses, searchQuery]);
+  const filteredWarehouses = useMemo(
+    () =>
+      filterWarehousesForRegion({
+        warehouses,
+        farmerState: profile?.state || "",
+        regionFilter,
+        searchQuery,
+      }),
+    [warehouses, profile?.state, regionFilter, searchQuery]
+  );
 
   const selectedPinWarehouse =
     filteredWarehouses.find((w) => w.id === selectedPinId) ||
@@ -109,10 +120,14 @@ export function WarehousesPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-display font-bold text-[#1B2A20]">
-            Find Storage Near You
+            {isOwner
+              ? "My Warehouses & Farmer Bookings"
+              : "Find Storage Near You"}
           </h1>
           <p className="text-sm text-[#4A5A4F] mt-1">
-            Compare grain & cold storage godowns, capacity, and monthly rates.
+            {isOwner
+              ? "Publish storage bays, toggle listing status, and approve incoming farmer requests."
+              : "Compare grain & cold storage godowns, capacity, and monthly rates."}
           </p>
         </div>
 
@@ -121,24 +136,24 @@ export function WarehousesPage() {
             <button
               type="button"
               onClick={() => setActiveTab("discover")}
-              className={`min-h-[40px] px-4 rounded-lg text-sm font-semibold transition-colors ${
+              className={`min-h-[40px] px-4 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap ${
                 activeTab === "discover"
                   ? "bg-white text-[#1B2A20] shadow-sm"
                   : "text-[#4A5A4F]"
               }`}
             >
-              Browse Storage
+              Market Directory
             </button>
             <button
               type="button"
               onClick={() => setActiveTab("owner")}
-              className={`min-h-[40px] px-4 rounded-lg text-sm font-semibold transition-colors ${
+              className={`min-h-[40px] px-4 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap ${
                 activeTab === "owner"
                   ? "bg-white text-[#1B2A20] shadow-sm"
                   : "text-[#4A5A4F]"
               }`}
             >
-              Owner Portal
+              My Warehouses
             </button>
           </div>
         )}
@@ -311,68 +326,172 @@ export function WarehousesPage() {
               .map((w) => (
                 <div
                   key={w.id}
-                  className="bg-white rounded-2xl border border-[#2D6A4F]/15 p-5"
+                  className="bg-white rounded-2xl border border-[#2D6A4F]/15 p-5 flex items-start justify-between gap-3"
                 >
-                  <p className="font-semibold text-base text-[#1B2A20]">
-                    {w.name}
-                  </p>
-                  <p className="text-xs text-[#4A5A4F] mt-0.5">{w.cityState}</p>
-                  <p className="text-sm text-[#1B2A20] mt-2 tabular-nums">
-                    {w.availableCapacityMt} / {w.totalCapacityMt} MT available ·
-                    Rs. {w.pricePerQuintalMonth}/quintal/mo
-                  </p>
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-[#2D6A4F]">
+                      {w.status}
+                    </p>
+                    <p className="font-semibold text-base text-[#1B2A20] mt-0.5">
+                      {w.name}
+                    </p>
+                    <p className="text-xs text-[#4A5A4F] mt-0.5">{w.cityState}</p>
+                    <p className="text-sm text-[#1B2A20] mt-2 tabular-nums">
+                      {w.availableCapacityMt.toLocaleString("en-IN")} /{" "}
+                      {w.totalCapacityMt.toLocaleString("en-IN")} MT available ·
+                      Rs. {w.pricePerQuintalMonth}/quintal/mo
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateWarehouseListing({
+                        warehouseId: w.id,
+                        availableCapacityMt: w.availableCapacityMt,
+                        pricePerQuintalMonth: w.pricePerQuintalMonth,
+                        status: w.status === "active" ? "paused" : "active",
+                      })
+                    }
+                    className="min-h-[36px] px-3 rounded-xl border border-[#2D6A4F]/25 text-xs font-semibold text-[#2D6A4F] hover:bg-[#EAF4EE] shrink-0 whitespace-nowrap"
+                  >
+                    {w.status === "active" ? "Pause" : "Activate"}
+                  </button>
                 </div>
               ))}
           </div>
         </div>
       ) : (
         <>
-          {/* Search + List/Map Toggle */}
-          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
-            <div className="relative flex-1">
-              <label htmlFor="warehouse-search" className="sr-only">
-                Search warehouses by city, name, or facility
-              </label>
-              <MapPin className="w-5 h-5 text-[#2D6A4F] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                id="warehouse-search"
-                type="search"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by city, crop facility (e.g. Onion, Punjab)..."
-                className="w-full h-12 pl-11 pr-4 rounded-xl bg-white border border-[#2D6A4F]/20 text-sm md:text-base focus:outline-none focus:ring-2 focus:ring-[#2D6A4F]/30"
-              />
+          {/* Search + Region Filter + List/Map Toggle */}
+          <div className="space-y-3">
+            <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+              <div className="relative flex-1">
+                <label htmlFor="warehouse-search" className="sr-only">
+                  Search warehouses by city, name, or facility
+                </label>
+                <MapPin className="w-5 h-5 text-[#2D6A4F] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="warehouse-search"
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search by city, crop facility (e.g. Wheat, Cold Storage)..."
+                  className="w-full h-12 pl-11 pr-4 rounded-xl bg-white border border-[#2D6A4F]/20 text-sm md:text-base focus:outline-none focus:ring-2 focus:ring-[#2D6A4F]/30"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <label htmlFor="warehouse-region-filter" className="sr-only">
+                  Filter warehouses by state
+                </label>
+                <select
+                  id="warehouse-region-filter"
+                  value={regionFilter}
+                  onChange={(e) => {
+                    setUserEditedRegion(true);
+                    setRegionFilter(e.target.value);
+                  }}
+                  className="h-12 px-3.5 rounded-xl bg-white border border-[#2D6A4F]/20 text-sm font-medium text-[#1B2A20] focus:outline-none focus:ring-2 focus:ring-[#2D6A4F]/30"
+                >
+                  {INDIAN_STATES.map((st) => (
+                    <option key={st} value={st}>
+                      {st === "All India" ? "All India" : st}
+                    </option>
+                  ))}
+                  {regionFilter &&
+                    regionFilter !== "All India" &&
+                    !INDIAN_STATES.includes(regionFilter) && (
+                      <option value={regionFilter}>{regionFilter}</option>
+                    )}
+                </select>
+
+                <div className="flex items-center gap-1 p-1 bg-[#F2EFE6] rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("list")}
+                    className={`min-h-[40px] px-4 rounded-lg text-sm font-semibold inline-flex items-center gap-1.5 transition-colors ${
+                      viewMode === "list"
+                        ? "bg-white text-[#1B2A20] shadow-sm"
+                        : "text-[#4A5A4F]"
+                    }`}
+                  >
+                    <List className="w-4 h-4" />
+                    <span>List</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("map")}
+                    className={`min-h-[40px] px-4 rounded-lg text-sm font-semibold inline-flex items-center gap-1.5 transition-colors ${
+                      viewMode === "map"
+                        ? "bg-white text-[#1B2A20] shadow-sm"
+                        : "text-[#4A5A4F]"
+                    }`}
+                  >
+                    <MapPin className="w-4 h-4" />
+                    <span>Map</span>
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center gap-1 p-1 bg-[#F2EFE6] rounded-xl self-start sm:self-auto">
-              <button
-                type="button"
-                onClick={() => setViewMode("list")}
-                className={`min-h-[40px] px-4 rounded-lg text-sm font-semibold inline-flex items-center gap-1.5 transition-colors ${
-                  viewMode === "list"
-                    ? "bg-white text-[#1B2A20] shadow-sm"
-                    : "text-[#4A5A4F]"
-                }`}
-              >
-                <List className="w-4 h-4" />
-                <span>List</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("map")}
-                className={`min-h-[40px] px-4 rounded-lg text-sm font-semibold inline-flex items-center gap-1.5 transition-colors ${
-                  viewMode === "map"
-                    ? "bg-white text-[#1B2A20] shadow-sm"
-                    : "text-[#4A5A4F]"
-                }`}
-              >
-                <MapPin className="w-4 h-4" />
-                <span>Map</span>
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#4A5A4F]">
+              <span>
+                {regionFilter === "All India"
+                  ? `Showing ${filteredWarehouses.length} active storage facilities across India`
+                  : `Showing ${filteredWarehouses.length} nearby storage ${
+                      filteredWarehouses.length === 1 ? "facility" : "facilities"
+                    } in ${regionFilter}`}
+              </span>
+              {regionFilter !== "All India" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUserEditedRegion(true);
+                    setRegionFilter("All India");
+                  }}
+                  className="font-semibold text-[#2D6A4F] hover:underline"
+                >
+                  Browse other states
+                </button>
+              )}
             </div>
           </div>
 
-          {viewMode === "list" ? (
+          {filteredWarehouses.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-[#2D6A4F]/15 p-8 text-center space-y-3">
+              <Warehouse className="w-10 h-10 text-[#2D6A4F]/60 mx-auto" />
+              <h2 className="font-display font-semibold text-lg text-[#1B2A20]">
+                No storage facilities matched in {regionFilter}
+              </h2>
+              <p className="text-sm text-[#4A5A4F] max-w-md mx-auto">
+                No listed godowns matched your current search or state filter. You
+                can expand to nearby states across India or clear your search text.
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                {regionFilter !== "All India" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserEditedRegion(true);
+                      setRegionFilter("All India");
+                    }}
+                    className="min-h-[40px] px-4 rounded-xl bg-[#2D6A4F] text-white text-xs font-semibold"
+                  >
+                    Show All India Warehouses
+                  </button>
+                )}
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="min-h-[40px] px-4 rounded-xl border border-[#2D6A4F]/25 text-[#2D6A4F] text-xs font-semibold"
+                  >
+                    Clear Search
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : viewMode === "list" ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {filteredWarehouses.map((wh) => (
                 <Link

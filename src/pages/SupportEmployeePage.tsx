@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from "react";
 import {
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   Clock,
+  Flag,
   Headphones,
   KeyRound,
   Lock,
@@ -21,6 +23,11 @@ import {
   type SupportTicketRecord,
 } from "../context/AuthContext";
 import { generateOneTimePassword } from "../utils/employeeAccess";
+import {
+  isActiveComplaint,
+  isComplaintTicket,
+  prioritizeSupportTickets,
+} from "../utils/supportTicketStats";
 
 export function SupportEmployeePage() {
   const {
@@ -41,7 +48,7 @@ export function SupportEmployeePage() {
     "all" | "open" | "in_review" | "resolved"
   >("all");
   const [categoryFilter, setCategoryFilter] = useState<
-    "all" | "support" | "wellbeing"
+    "all" | "complaint" | "support" | "wellbeing"
   >("all");
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -65,7 +72,7 @@ export function SupportEmployeePage() {
 
   const filteredTickets = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return allSupportTickets.filter((t) => {
+    const matched = allSupportTickets.filter((t) => {
       if (statusFilter !== "all" && t.status !== statusFilter) return false;
       if (categoryFilter !== "all" && t.category !== categoryFilter)
         return false;
@@ -76,6 +83,7 @@ export function SupportEmployeePage() {
         (t.assignedEmployeeName || "").toLowerCase().includes(q)
       );
     });
+    return prioritizeSupportTickets(matched);
   }, [allSupportTickets, statusFilter, categoryFilter, searchQuery]);
 
   if (!hasAccess) {
@@ -96,6 +104,9 @@ export function SupportEmployeePage() {
   const openCount = allSupportTickets.filter((t) => t.status === "open").length;
   const reviewCount = allSupportTickets.filter(
     (t) => t.status === "in_review"
+  ).length;
+  const activeComplaintsCount = allSupportTickets.filter((t) =>
+    isActiveComplaint(t)
   ).length;
   const urgentCount = allSupportTickets.filter(
     (t) => t.priority === "urgent" && t.status !== "resolved"
@@ -242,7 +253,14 @@ export function SupportEmployeePage() {
             }`}
           >
             <Headphones className="w-4 h-4" />
-            <span>Support Tickets ({allSupportTickets.length})</span>
+            <span>
+              Support Tickets ({allSupportTickets.length})
+              {activeComplaintsCount > 0
+                ? ` · ${activeComplaintsCount} Priority Complaint${
+                    activeComplaintsCount > 1 ? "s" : ""
+                  }`
+                : ""}
+            </span>
           </button>
         </div>
       )}
@@ -574,8 +592,64 @@ export function SupportEmployeePage() {
       {/* SUPPORT TICKETS QUEUE (Visible to Support Employees and Admin on Tickets tab) */}
       {showTicketsSection && (
         <>
+          {/* Active Priority Complaint Alert Banner */}
+          {activeComplaintsCount > 0 && (
+            <div
+              role="region"
+              aria-label="Active priority complaints alert"
+              className="rounded-2xl bg-red-50 border-2 border-red-300 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-red-100 text-red-700 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="font-display font-semibold text-sm text-red-900">
+                    {activeComplaintsCount} Active Priority Complaint
+                    {activeComplaintsCount > 1 ? "s" : ""} Require Immediate
+                    Attention
+                  </p>
+                  <p className="text-xs text-red-800 mt-0.5">
+                    Complaints are automatically pinned to the top of your queue
+                    and highlighted in red until resolved.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setCategoryFilter(
+                    categoryFilter === "complaint" ? "all" : "complaint"
+                  )
+                }
+                className="min-h-[38px] px-4 rounded-xl bg-red-700 hover:bg-red-800 text-white text-xs font-semibold inline-flex items-center gap-1.5 self-start sm:self-auto shrink-0 transition-colors"
+              >
+                <Flag className="w-3.5 h-3.5" />
+                <span>
+                  {categoryFilter === "complaint"
+                    ? "Show All Tickets"
+                    : "Filter Complaints Only"}
+                </span>
+              </button>
+            </div>
+          )}
+
           {/* KPI Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4">
+            <div
+              className={`rounded-2xl p-4 md:p-5 border ${
+                activeComplaintsCount > 0
+                  ? "bg-red-50/70 border-2 border-red-300"
+                  : "bg-white border-[#2D6A4F]/15"
+              }`}
+            >
+              <p className="text-xs font-semibold text-red-800">
+                Priority Complaints
+              </p>
+              <p className="text-2xl font-display font-bold text-red-900 tabular-nums mt-1">
+                {activeComplaintsCount}
+              </p>
+            </div>
             <div className="bg-white rounded-2xl border border-[#2D6A4F]/15 p-4 md:p-5">
               <p className="text-xs font-semibold text-[#2D6A4F]">Open Queue</p>
               <p className="text-2xl font-display font-bold text-[#1B2A20] tabular-nums mt-1">
@@ -643,12 +717,17 @@ export function SupportEmployeePage() {
                 value={categoryFilter}
                 onChange={(e) =>
                   setCategoryFilter(
-                    e.target.value as "all" | "support" | "wellbeing"
+                    e.target.value as
+                      | "all"
+                      | "complaint"
+                      | "support"
+                      | "wellbeing"
                   )
                 }
                 className="h-10 px-3 rounded-xl bg-white border border-[#2D6A4F]/20 text-xs font-semibold text-[#1B2A20]"
               >
                 <option value="all">All Categories</option>
+                <option value="complaint">Complaints (Priority)</option>
                 <option value="support">General Support</option>
                 <option value="wellbeing">Well-Being Follow-Up</option>
               </select>
@@ -673,18 +752,45 @@ export function SupportEmployeePage() {
                   replyDrafts[t.id] !== undefined
                     ? replyDrafts[t.id]
                     : t.employeeReply || "";
+                const isComplaint = isComplaintTicket(t);
+                const activeComplaint = isActiveComplaint(t);
                 return (
                   <article
                     key={t.id}
-                    className="bg-white rounded-2xl border border-[#2D6A4F]/15 p-5 md:p-6 space-y-4"
+                    className={`rounded-2xl p-5 md:p-6 space-y-4 ${
+                      activeComplaint
+                        ? "bg-red-50/45 border-2 border-red-300"
+                        : "bg-white border border-[#2D6A4F]/15"
+                    }`}
                   >
+                    {activeComplaint && (
+                      <div className="px-3 py-2 rounded-xl bg-red-100/90 border border-red-200 flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-red-900">
+                        <span className="inline-flex items-center gap-1.5 uppercase tracking-wide">
+                          <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+                          <span>
+                            High Priority Complaint · Immediate Review Required
+                          </span>
+                        </span>
+                        <span className="uppercase text-red-800">
+                          {t.status.replace("_", " ")}
+                        </span>
+                      </div>
+                    )}
+
                     <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
                       <div>
                         <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                          <span className="uppercase text-[#2D6A4F]">
-                            {t.category} · {t.status.replace("_", " ")}
+                          <span
+                            className={`uppercase ${
+                              activeComplaint
+                                ? "text-red-800"
+                                : "text-[#2D6A4F]"
+                            }`}
+                          >
+                            {isComplaint ? "Complaint" : t.category} ·{" "}
+                            {t.status.replace("_", " ")}
                           </span>
-                          {t.priority === "urgent" && (
+                          {t.priority === "urgent" && !activeComplaint && (
                             <span className="text-amber-700 uppercase">
                               · Urgent Priority
                             </span>
@@ -706,7 +812,13 @@ export function SupportEmployeePage() {
                       </span>
                     </div>
 
-                    <p className="text-sm text-[#4A5A4F] leading-relaxed bg-[#FAF8F3] p-3.5 rounded-xl">
+                    <p
+                      className={`text-sm text-[#4A5A4F] leading-relaxed p-3.5 rounded-xl ${
+                        activeComplaint
+                          ? "bg-white border border-red-200/80"
+                          : "bg-[#FAF8F3]"
+                      }`}
+                    >
                       {t.message}
                     </p>
 

@@ -141,7 +141,7 @@ service cloud.firestore {
         && data.coverageOrLimit is string && data.coverageOrLimit.size() >= 2 && data.coverageOrLimit.size() <= 120
         && data.eligibilitySummary is string && data.eligibilitySummary.size() >= 2 && data.eligibilitySummary.size() <= 300
         && data.contactHelpline is string && data.contactHelpline.size() >= 2 && data.contactHelpline.size() <= 60
-        && (!('websiteUrl' in data) || (data.websiteUrl is string && data.websiteUrl.size() <= 200))
+        && (!('websiteUrl' in data) || (data.websiteUrl is string && data.websiteUrl.size() <= 200 && (data.websiteUrl.size() == 0 || data.websiteUrl.matches('^https?://.*'))))
         && data.status in ['active', 'paused']
         && isValidId(data.createdBy)
         && data.createdAt is timestamp
@@ -254,7 +254,7 @@ service cloud.firestore {
           'status', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.userId)
-        && data.category in ['support', 'wellbeing']
+        && data.category in ['support', 'complaint', 'wellbeing']
         && data.subject is string && data.subject.size() >= 2 && data.subject.size() <= 120
         && data.message is string && data.message.size() >= 5 && data.message.size() <= 1000
         && (!('priority' in data) || data.priority in ['normal', 'urgent'])

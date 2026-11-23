@@ -28,3 +28,14 @@ test("searchPlatformContent respects category filters and empty input", () => {
   assert.ok(filtered.length >= 1);
   assert.ok(filtered.every((item) => item.category === "Insurance"));
 });
+
+test("searchPlatformContent filters out farmer crop/scheme results for warehouse_owner", () => {
+  const ownerLoanHits = searchPlatformContent("warehouse", [], "All", "warehouse_owner");
+  assert.ok(ownerLoanHits.some((item) => item.category === "Loans"));
+  assert.ok(ownerLoanHits.some((item) => item.category === "Insurance"));
+  assert.ok(!ownerLoanHits.some((item) => item.id === "loan-kcc-crop-loan"));
+  assert.ok(!ownerLoanHits.some((item) => item.id === "insurance-pmfby-plan"));
+
+  const ownerSchemeHits = searchPlatformContent("pm-kisan", [], "All", "warehouse_owner");
+  assert.ok(!ownerSchemeHits.some((item) => item.category === "Schemes"));
+});

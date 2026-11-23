@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -12,18 +12,43 @@ import {
 } from "lucide-react";
 import { LOANS_DATA } from "../data/bhoomiData";
 import { useAuth } from "../context/AuthContext";
+import {
+  filterPartnerCompaniesForRole,
+  getLoanFilterTabsForRole,
+  getLoansForRole,
+} from "../utils/warehouseFinance";
+import { getSafeExternalUrl } from "../utils/safeUrl";
 
 export function LoansPage() {
-  const { partnerCompanies } = useAuth();
+  const { profile, partnerCompanies } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(
     searchParams.get("loan")
   );
   const [filterType, setFilterType] = useState<string>("All");
 
-  const activeLoan = LOANS_DATA.find((l) => l.id === selectedLoanId);
-  const activeLoanCompanies = partnerCompanies.filter(
-    (c) => c.category === "loan" && c.status === "active"
+  const isOwner = profile?.role === "warehouse_owner";
+
+  const roleLoans = useMemo(
+    () => getLoansForRole(profile?.role, LOANS_DATA),
+    [profile?.role]
+  );
+
+  const loanTypes = useMemo(
+    () => getLoanFilterTabsForRole(profile?.role),
+    [profile?.role]
+  );
+
+  useEffect(() => {
+    if (!loanTypes.includes(filterType)) {
+      setFilterType("All");
+    }
+  }, [loanTypes, filterType]);
+
+  const activeLoan = roleLoans.find((l) => l.id === selectedLoanId);
+  const activeLoanCompanies = useMemo(
+    () => filterPartnerCompaniesForRole(profile?.role, "loan", partnerCompanies),
+    [profile?.role, partnerCompanies]
   );
 
   const openLoan = (id: string) => {
@@ -86,7 +111,7 @@ export function LoansPage() {
             <div className="flex items-center gap-2 text-[#2D6A4F]">
               <Landmark className="w-5 h-5" />
               <h2 className="font-display font-semibold text-base text-[#1B2A20]">
-                Interest & Repayment
+                Interest &amp; Repayment
               </h2>
             </div>
             <ul className="space-y-2 text-sm text-[#4A5A4F] list-disc pl-5 leading-relaxed">
@@ -125,28 +150,26 @@ export function LoansPage() {
           </section>
         </div>
 
-        <a
-          href={activeLoan.officialUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="w-full sm:w-auto min-h-[48px] px-7 rounded-xl bg-[#E9A23B] hover:bg-[#DC9428] text-[#1B2A20] font-semibold text-sm inline-flex items-center justify-center gap-2 transition-colors"
-        >
-          <span>Visit Official Portal</span>
-          <ExternalLink className="w-4 h-4" />
-        </a>
+        {getSafeExternalUrl(activeLoan.officialUrl) && (
+          <a
+            href={getSafeExternalUrl(activeLoan.officialUrl)!}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full sm:w-auto min-h-[48px] px-7 rounded-xl bg-[#E9A23B] hover:bg-[#DC9428] text-[#1B2A20] font-semibold text-sm inline-flex items-center justify-center gap-2 transition-colors"
+          >
+            <span>
+              {isOwner
+                ? "Visit Commercial Lending Portal"
+                : "Visit Official Portal"}
+            </span>
+            <ExternalLink className="w-4 h-4" />
+          </a>
+        )}
       </div>
     );
   }
 
-  const loanTypes = [
-    "All",
-    "Crop Loan",
-    "Equipment Loan",
-    "Infrastructure Loan",
-    "Allied Agri Loan",
-  ];
-
-  const visibleLoans = LOANS_DATA.filter(
+  const visibleLoans = roleLoans.filter(
     (l) => filterType === "All" || l.loanType === filterType
   );
 
@@ -154,13 +177,27 @@ export function LoansPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl md:text-3xl font-display font-bold text-[#1B2A20]">
-          Financial Assistance & Loans
+          {isOwner
+            ? "Commercial Warehouse Financing & Loans"
+            : "Financial Assistance & Loans"}
         </h1>
         <p className="text-sm text-[#4A5A4F] mt-1">
-          Simple explanations of institutional farm credit without hidden
-          banking jargon.
+          {isOwner
+            ? "Term loans, working capital overdrafts, and land purchase credit for warehouse construction and operations."
+            : "Simple explanations of institutional farm credit without hidden banking jargon."}
         </p>
       </div>
+
+      {isOwner && (
+        <div className="bg-[#EAF4EE] rounded-2xl border border-[#2D6A4F]/15 p-5 md:p-6">
+          <p className="text-sm md:text-base text-[#1B2A20] leading-relaxed">
+            Financing shown below is tailored strictly for commercial godown
+            owners — covering new warehouse or cold-storage construction,
+            working capital overdrafts for utilities and staff, and commercial
+            storage plot acquisition (excludes crop cultivation loans).
+          </p>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
         {loanTypes.map((type) => (
@@ -210,7 +247,9 @@ export function LoansPage() {
         <section className="space-y-4 pt-2">
           <div>
             <h2 className="font-display font-semibold text-lg text-[#1B2A20]">
-              Verified Partner Loan Companies ({activeLoanCompanies.length})
+              {isOwner
+                ? `Commercial Warehouse Lending Partners (${activeLoanCompanies.length})`
+                : `Verified Partner Loan Companies (${activeLoanCompanies.length})`}
             </h2>
             <p className="text-xs text-[#4A5A4F]">
               Banks and financial institutions published by BhoomiBandhu Admin.
@@ -239,9 +278,9 @@ export function LoansPage() {
                     <Phone className="w-3.5 h-3.5" />
                     Helpline: {comp.contactHelpline}
                   </span>
-                  {comp.websiteUrl && (
+                  {getSafeExternalUrl(comp.websiteUrl) && (
                     <a
-                      href={comp.websiteUrl}
+                      href={getSafeExternalUrl(comp.websiteUrl)!}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="font-semibold text-[#2D6A4F] hover:underline inline-flex items-center gap-1"

@@ -49,7 +49,7 @@
         "coverageOrLimit": { "type": "string", "minLength": 2, "maxLength": 120 },
         "eligibilitySummary": { "type": "string", "minLength": 2, "maxLength": 300 },
         "contactHelpline": { "type": "string", "minLength": 2, "maxLength": 60 },
-        "websiteUrl": { "type": "string", "maxLength": 200 },
+        "websiteUrl": { "type": "string", "maxLength": 200, "pattern": "^https?://.*" },
         "status": { "type": "string", "enum": ["active", "paused"] },
         "createdBy": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "createdAt": { "type": "string", "format": "date-time" },
@@ -146,7 +146,7 @@
       "type": "object",
       "properties": {
         "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "category": { "type": "string", "enum": ["support", "wellbeing"] },
+        "category": { "type": "string", "enum": ["support", "complaint", "wellbeing"] },
         "subject": { "type": "string", "minLength": 2, "maxLength": 120 },
         "message": { "type": "string", "minLength": 5, "maxLength": 1000 },
         "priority": { "type": "string", "enum": ["normal", "urgent"] },

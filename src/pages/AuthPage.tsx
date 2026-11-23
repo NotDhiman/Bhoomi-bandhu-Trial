@@ -3,7 +3,6 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   CheckCircle2,
-  ExternalLink,
   Eye,
   EyeOff,
   KeyRound,
@@ -14,9 +13,9 @@ import {
   UserPlus,
   Warehouse,
 } from "lucide-react";
-import firebaseConfig from "../../firebase-applet-config.json";
 import { useAuth } from "../context/AuthContext";
 import { LanguageSelector } from "../components/LanguageSelector";
+import { INDIAN_STATES } from "../data/bhoomiData";
 import {
   ADMIN_BOOTSTRAP_EMAIL,
   DEMO_ACCOUNTS,
@@ -66,17 +65,17 @@ export function AuthPage() {
   const [mode, setMode] = useState<"login" | "register" | "forgot">("login");
   const [role, setRole] = useState<UserRole>("farmer");
   const [name, setName] = useState("");
+  const [stateRegion, setStateRegion] = useState("");
+  const [district, setDistrict] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [specialization, setSpecialization] = useState("");
   const [qualification, setQualification] = useState("");
-  const [department, setDepartment] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [emailProviderNotice, setEmailProviderNotice] = useState(false);
   const [infoMessage, setInfoMessage] = useState("");
 
   useEffect(() => {
@@ -90,11 +89,10 @@ export function AuthPage() {
   const formatAuthError = (err: unknown): string => {
     const msg = err instanceof Error ? err.message : String(err);
     if (
-      msg.includes("FIREBASE_EMAIL_PASSWORD_DISABLED") ||
-      msg.includes("auth/operation-not-allowed")
+      msg.includes("auth/operation-not-allowed") ||
+      msg.includes("FIREBASE_EMAIL_PASSWORD_DISABLED")
     ) {
-      setEmailProviderNotice(true);
-      return "";
+      return "Incorrect email or password, or no account exists with this email yet. Please check your details or click Sign Up.";
     }
     if (
       msg.includes("auth/invalid-credential") ||
@@ -118,7 +116,6 @@ export function AuthPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    setEmailProviderNotice(false);
     setInfoMessage("");
 
     if (!email.trim() || !email.includes("@")) {
@@ -151,6 +148,10 @@ export function AuthPage() {
         setError("Please enter your full name.");
         return;
       }
+      if (!stateRegion.trim()) {
+        setError("Please select your state or region.");
+        return;
+      }
       if (password !== confirmPassword) {
         setError("Passwords do not match. Please re-type carefully.");
         return;
@@ -167,9 +168,10 @@ export function AuthPage() {
           email: email.trim(),
           password,
           role,
+          state: stateRegion.trim(),
+          district: district.trim(),
           specialization: specialization.trim() || undefined,
           qualification: qualification.trim() || undefined,
-          department: department.trim() || undefined,
         });
       }
     } catch (err) {
@@ -181,11 +183,10 @@ export function AuthPage() {
 
   const handleGoogleSignIn = async () => {
     setError("");
-    setEmailProviderNotice(false);
     setInfoMessage("");
     setLoading(true);
     try {
-      await signInWithGoogle(role);
+      await signInWithGoogle(role, stateRegion.trim(), district.trim());
     } catch (err) {
       setError(formatAuthError(err));
     } finally {
@@ -198,7 +199,6 @@ export function AuthPage() {
     setEmail(acc.email);
     setPassword(acc.password);
     setError("");
-    setEmailProviderNotice(false);
     setInfoMessage("");
     setLoading(true);
     try {
@@ -249,7 +249,6 @@ export function AuthPage() {
                 onClick={() => {
                   setMode("login");
                   setError("");
-                  setEmailProviderNotice(false);
                   setInfoMessage("");
                 }}
                 className={`min-h-[42px] rounded-lg text-sm font-semibold transition-colors ${
@@ -267,7 +266,6 @@ export function AuthPage() {
                 onClick={() => {
                   setMode("register");
                   setError("");
-                  setEmailProviderNotice(false);
                   setInfoMessage("");
                 }}
                 className={`min-h-[42px] rounded-lg text-sm font-semibold transition-colors ${
@@ -295,59 +293,6 @@ export function AuthPage() {
               ? "Choose your profile role so we personalize your tools and dashboard."
               : "Enter your registered email address and we will send a reset link."}
           </p>
-
-          {emailProviderNotice && (
-            <div
-              role="status"
-              className="mb-5 p-4 rounded-xl bg-amber-50 border border-amber-200 text-[#1B2A20] text-sm space-y-2.5"
-            >
-              <div className="flex items-start gap-2.5">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-700" />
-                <div className="space-y-1">
-                  <p className="font-semibold text-amber-950">
-                    Email/Password sign-in is not turned on in Firebase Console yet
-                  </p>
-                  <p className="text-xs text-amber-900 leading-relaxed">
-                    Google Sign-In is ready immediately for live cloud accounts.
-                    To use Firebase Email/Password logins, enable{" "}
-                    <strong>Email/Password</strong> under{" "}
-                    <strong>Authentication &rarr; Sign-in method</strong> in
-                    Firebase Console, or sign up / use a Test Profile below.
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 pl-6">
-                <button
-                  type="button"
-                  onClick={handleGoogleSignIn}
-                  disabled={loading}
-                  className="min-h-[36px] px-3.5 rounded-lg bg-[#2D6A4F] hover:bg-[#23543E] text-white text-xs font-semibold transition-colors"
-                >
-                  Continue with Google
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode("register");
-                    setEmailProviderNotice(false);
-                    setError("");
-                  }}
-                  className="min-h-[36px] px-3.5 rounded-lg bg-white border border-amber-300 text-[#1B2A20] hover:bg-amber-100/60 text-xs font-semibold transition-colors"
-                >
-                  Create Account in App
-                </button>
-                <a
-                  href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/providers`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="min-h-[36px] px-3 rounded-lg text-xs font-semibold text-[#2D6A4F] hover:underline inline-flex items-center gap-1"
-                >
-                  <span>Firebase Console</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              </div>
-            </div>
-          )}
 
           {error && (
             <div
@@ -410,22 +355,64 @@ export function AuthPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === "register" && (
-              <div>
-                <label
-                  htmlFor="auth-name"
-                  className="block text-sm font-medium text-[#1B2A20] mb-1.5"
-                >
-                  Full Name
-                </label>
-                <input
-                  id="auth-name"
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Harpreet Singh"
-                  className="w-full h-12 px-4 rounded-xl bg-[#FAF8F3] border border-[#2D6A4F]/25 text-base focus:outline-none focus:ring-2 focus:ring-[#2D6A4F]/30"
-                />
-              </div>
+              <>
+                <div>
+                  <label
+                    htmlFor="auth-name"
+                    className="block text-sm font-medium text-[#1B2A20] mb-1.5"
+                  >
+                    Full Name
+                  </label>
+                  <input
+                    id="auth-name"
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Rajesh Deshmukh"
+                    className="w-full h-12 px-4 rounded-xl bg-[#FAF8F3] border border-[#2D6A4F]/25 text-base focus:outline-none focus:ring-2 focus:ring-[#2D6A4F]/30"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label
+                      htmlFor="auth-state"
+                      className="block text-sm font-medium text-[#1B2A20] mb-1.5"
+                    >
+                      State / Region
+                    </label>
+                    <select
+                      id="auth-state"
+                      value={stateRegion}
+                      onChange={(e) => setStateRegion(e.target.value)}
+                      className="w-full h-12 px-3.5 rounded-xl bg-[#FAF8F3] border border-[#2D6A4F]/25 text-sm focus:outline-none focus:ring-2 focus:ring-[#2D6A4F]/30"
+                    >
+                      <option value="">Select your state...</option>
+                      {INDIAN_STATES.filter((s) => s !== "All India").map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="auth-district"
+                      className="block text-sm font-medium text-[#1B2A20] mb-1.5"
+                    >
+                      District / City (optional)
+                    </label>
+                    <input
+                      id="auth-district"
+                      type="text"
+                      value={district}
+                      onChange={(e) => setDistrict(e.target.value)}
+                      placeholder="e.g. Nashik, Ludhiana, Indore"
+                      className="w-full h-12 px-4 rounded-xl bg-[#FAF8F3] border border-[#2D6A4F]/25 text-sm focus:outline-none focus:ring-2 focus:ring-[#2D6A4F]/30"
+                    />
+                  </div>
+                </div>
+              </>
             )}
 
             {mode === "register" && role === "psychiatrist" && (

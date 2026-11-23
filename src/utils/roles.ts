@@ -154,7 +154,6 @@ export function getDefaultRouteForRole(
     case "support_staff":
       return "/support-desk";
     case "warehouse_owner":
-      return "/warehouses";
     case "farmer":
     default:
       return "/";
@@ -167,6 +166,15 @@ export const ADMIN_ALLOWED_PREFIXES = [
   "/support-desk",
   "/notifications",
   "/profile",
+] as const;
+
+const FARMER_ONLY_PREFIXES = [
+  "/schemes",
+  "/eligibility",
+  "/crop-advisor",
+  "/chat",
+  "/wellbeing",
+  "/services",
 ] as const;
 
 export function canAccessRoute(
@@ -185,6 +193,15 @@ export function canAccessRoute(
   }
   if (path.startsWith("/support-desk")) {
     return role === "support_staff";
+  }
+  if (path.startsWith("/wellbeing")) {
+    return role === "farmer";
+  }
+  if (
+    role === "warehouse_owner" &&
+    FARMER_ONLY_PREFIXES.some((prefix) => path.startsWith(prefix))
+  ) {
+    return false;
   }
   return true;
 }

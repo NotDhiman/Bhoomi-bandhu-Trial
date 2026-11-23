@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from "react";
 import {
+  AlertTriangle,
   Building2,
   CheckCircle2,
   Eye,
+  Flag,
   Headphones,
   Landmark,
   Lock,
@@ -19,6 +21,12 @@ import {
 import { useAuth, type UserProfileData } from "../context/AuthContext";
 import { SupportTicketStatusWidget } from "../components/SupportTicketStatusWidget";
 import { getRoleDisplayLabel, type UserRole } from "../utils/roles";
+import {
+  isActiveComplaint,
+  isComplaintTicket,
+  prioritizeSupportTickets,
+} from "../utils/supportTicketStats";
+import { getSafeExternalUrl } from "../utils/safeUrl";
 
 type AdminTab =
   | "overview"
@@ -73,6 +81,9 @@ export function AdminPage() {
   const [inspectedUser, setInspectedUser] = useState<UserProfileData | null>(
     null
   );
+  const [ticketFilter, setTicketFilter] = useState<"all" | "complaints">(
+    "all"
+  );
 
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
@@ -93,6 +104,19 @@ export function AdminPage() {
       (c) => companyFilter === "all" || c.category === companyFilter
     );
   }, [partnerCompanies, companyFilter]);
+
+  const activeComplaintsCount = useMemo(
+    () => allSupportTickets.filter((t) => isActiveComplaint(t)).length,
+    [allSupportTickets]
+  );
+
+  const prioritizedAdminTickets = useMemo(() => {
+    const base =
+      ticketFilter === "complaints"
+        ? allSupportTickets.filter((t) => isComplaintTicket(t))
+        : allSupportTickets;
+    return prioritizeSupportTickets(base);
+  }, [allSupportTickets, ticketFilter]);
 
   if (!isAdmin) {
     return (
@@ -124,6 +148,15 @@ export function AdminPage() {
       );
       return;
     }
+    const rawWebsite = compWebsite.trim();
+    const safeWebsite = rawWebsite ? getSafeExternalUrl(rawWebsite) : undefined;
+    if (rawWebsite && !safeWebsite) {
+      setErrorMsg(
+        "Official Portal URL must be a valid http:// or https:// web address."
+      );
+      return;
+    }
+
     setCompSaving(true);
     try {
       await addPartnerCompany({
@@ -133,7 +166,7 @@ export function AdminPage() {
         coverageOrLimit: compLimit.trim(),
         eligibilitySummary: compEligibility.trim(),
         contactHelpline: compHelpline.trim(),
-        websiteUrl: compWebsite.trim() || undefined,
+        websiteUrl: safeWebsite || undefined,
       });
       setNotice(
         `Added ${compName.trim()} (${compCategory}) to live partner directory.`
@@ -237,7 +270,12 @@ export function AdminPage() {
               }`}
             >
               <Icon className="w-4 h-4 shrink-0" />
-              <span>{tab.label}</span>
+              <span>
+                {tab.label}
+                {tab.id === "tickets" && activeComplaintsCount > 0
+                  ? ` (${activeComplaintsCount} Priority)`
+                  : ""}
+              </span>
             </button>
           );
         })}
@@ -318,15 +356,31 @@ export function AdminPage() {
                 {allBookings.length} total storage bookings
               </p>
             </div>
-            <div className="bg-white rounded-2xl border border-[#2D6A4F]/15 p-5">
-              <p className="text-xs font-semibold text-[#2D6A4F]">
-                Open Support Tickets
+            <div
+              className={`rounded-2xl p-5 border ${
+                activeComplaintsCount > 0
+                  ? "bg-red-50/50 border-2 border-red-300"
+                  : "bg-white border-[#2D6A4F]/15"
+              }`}
+            >
+              <p
+                className={`text-xs font-semibold ${
+                  activeComplaintsCount > 0 ? "text-red-800" : "text-[#2D6A4F]"
+                }`}
+              >
+                Open Tickets &amp; Complaints
               </p>
               <p className="text-2xl font-display font-bold text-[#1B2A20] tabular-nums mt-1">
                 {allSupportTickets.filter((t) => t.status !== "resolved").length}
               </p>
               <p className="text-xs text-[#4A5A4F] mt-1">
-                {allSupportTickets.length} total tickets logged
+                {activeComplaintsCount > 0 ? (
+                  <span className="font-semibold text-red-800">
+                    {activeComplaintsCount} priority complaint
+                    {activeComplaintsCount > 1 ? "s" : ""} active ·{" "}
+                  </span>
+                ) : null}
+                {allSupportTickets.length} total logged
               </p>
             </div>
           </div>
@@ -994,59 +1048,137 @@ export function AdminPage() {
         </div>
       )}
 
-      {/* TAB 6: SUPPORT TICKETS */}
+      {/* TAB 6: SUPPORT TICKETS & COMPLAINTS */}
       {activeTab === "tickets" && (
         <section className="bg-white rounded-2xl border border-[#2D6A4F]/15 p-5 space-y-4">
-          <h2 className="font-display font-semibold text-lg">
-            Support &amp; Well-Being Requests ({allSupportTickets.length})
-          </h2>
-          {allSupportTickets.length === 0 ? (
-            <p className="text-sm text-[#4A5A4F]">No tickets found.</p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="font-display font-semibold text-lg text-[#1B2A20]">
+                Complaints, Support &amp; Well-Being Requests (
+                {prioritizedAdminTickets.length})
+              </h2>
+              <p className="text-xs text-[#4A5A4F]">
+                Active complaints are automatically highlighted and sorted to the
+                top for priority handling.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setTicketFilter("all")}
+                className={`min-h-[36px] px-3.5 rounded-xl text-xs font-semibold transition-colors ${
+                  ticketFilter === "all"
+                    ? "bg-[#2D6A4F] text-white"
+                    : "bg-[#FAF8F3] border border-[#2D6A4F]/20 text-[#1B2A20]"
+                }`}
+              >
+                All ({allSupportTickets.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTicketFilter("complaints")}
+                className={`min-h-[36px] px-3.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-colors ${
+                  ticketFilter === "complaints"
+                    ? "bg-red-700 text-white"
+                    : "bg-red-50 border border-red-200 text-red-800 hover:bg-red-100"
+                }`}
+              >
+                <Flag className="w-3.5 h-3.5" />
+                <span>
+                  Complaints (
+                  {allSupportTickets.filter((t) => isComplaintTicket(t)).length}
+                  )
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {activeComplaintsCount > 0 && (
+            <div className="rounded-xl bg-red-50 border border-red-200 p-3.5 flex items-center gap-2.5 text-xs font-semibold text-red-900">
+              <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+              <span>
+                {activeComplaintsCount} Active Priority Complaint
+                {activeComplaintsCount > 1 ? "s" : ""} highlighted below ahead
+                of general requests.
+              </span>
+            </div>
+          )}
+
+          {prioritizedAdminTickets.length === 0 ? (
+            <p className="text-sm text-[#4A5A4F]">No matching tickets found.</p>
           ) : (
-            <div className="divide-y divide-[#2D6A4F]/10">
-              {allSupportTickets.map((t) => (
-                <div
-                  key={t.id}
-                  className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                >
-                  <div>
-                    <p className="text-xs font-semibold text-[#2D6A4F] uppercase">
-                      {t.category} · {t.status.replace("_", " ")}
-                      {t.priority === "urgent" ? " · Urgent" : ""}
-                      {t.assignedEmployeeName
-                        ? ` · Assigned: ${t.assignedEmployeeName}`
-                        : ""}
-                    </p>
-                    <p className="font-semibold text-sm text-[#1B2A20]">
-                      {t.subject}
-                    </p>
-                    <p className="text-xs text-[#4A5A4F] mt-0.5">{t.message}</p>
-                    {t.employeeReply && (
-                      <p className="text-xs text-[#1B2A20] bg-[#EAF4EE] px-2.5 py-1.5 rounded-lg mt-1.5">
-                        Reply: {t.employeeReply}
+            <div className="space-y-3">
+              {prioritizedAdminTickets.map((t) => {
+                const isComplaint = isComplaintTicket(t);
+                const activeComplaint = isActiveComplaint(t);
+                return (
+                  <div
+                    key={t.id}
+                    className={`p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                      activeComplaint
+                        ? "bg-red-50/55 border-2 border-red-300"
+                        : "bg-[#FAF8F3]/60 border border-[#2D6A4F]/15"
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      {activeComplaint && (
+                        <p className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-red-800">
+                          <AlertTriangle className="w-3.5 h-3.5 text-red-700 shrink-0" />
+                          <span>High Priority Complaint · Action Needed</span>
+                        </p>
+                      )}
+                      <p
+                        className={`text-xs font-semibold uppercase ${
+                          activeComplaint ? "text-red-800" : "text-[#2D6A4F]"
+                        }`}
+                      >
+                        {isComplaint ? "Complaint" : t.category} ·{" "}
+                        {t.status.replace("_", " ")}
+                        {t.priority === "urgent" ? " · Urgent" : ""}
+                        {t.assignedEmployeeName
+                          ? ` · Assigned: ${t.assignedEmployeeName}`
+                          : ""}
                       </p>
+                      <p className="font-semibold text-sm text-[#1B2A20]">
+                        {t.subject}
+                      </p>
+                      <p className="text-xs text-[#4A5A4F]">{t.message}</p>
+                      {t.employeeReply && (
+                        <p className="text-xs text-[#1B2A20] bg-[#EAF4EE] px-2.5 py-1.5 rounded-lg mt-1">
+                          Reply: {t.employeeReply}
+                        </p>
+                      )}
+                    </div>
+                    {t.status !== "resolved" && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateSupportTicket({
+                            ticketId: t.id,
+                            status: "resolved",
+                            claimTicket: !t.assignedEmployeeId,
+                            employeeReply:
+                              t.employeeReply ||
+                              "Resolved by BhoomiBandhu Admin.",
+                          })
+                        }
+                        className={`min-h-[38px] px-4 rounded-xl text-white text-xs font-semibold inline-flex items-center gap-1.5 self-start sm:self-auto shrink-0 ${
+                          activeComplaint
+                            ? "bg-red-700 hover:bg-red-800"
+                            : "bg-[#2D6A4F] hover:bg-[#24553F]"
+                        }`}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>
+                          {activeComplaint
+                            ? "Resolve Complaint"
+                            : "Mark Resolved"}
+                        </span>
+                      </button>
                     )}
                   </div>
-                  {t.status !== "resolved" && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateSupportTicket({
-                          ticketId: t.id,
-                          status: "resolved",
-                          claimTicket: !t.assignedEmployeeId,
-                          employeeReply:
-                            t.employeeReply || "Resolved by BhoomiBandhu Admin.",
-                        })
-                      }
-                      className="min-h-[38px] px-4 rounded-xl bg-[#2D6A4F] text-white text-xs font-semibold inline-flex items-center gap-1.5 self-start sm:self-auto shrink-0"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Mark Resolved</span>
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
