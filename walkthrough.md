@@ -1,6 +1,6 @@
 # Security Summary
 
-**Reviewed Files**: 22
+**Reviewed Files**: 24
 **Issues Resolved**: 6
 
 ### Issues Resolved
@@ -16,7 +16,7 @@
 ### Safeguards Verified
 | Area | File | How It's Protected |
 |---|---|---|
-| API Keys & Secrets | `server.ts`, `src/firebase.ts` | `GEMINI_API_KEY` and SMTP credentials stay strictly server-side (`process.env`) and are never exposed to the browser bundle. |
+| API Keys & Secrets | `server.ts`, `src/firebase.ts` | `GEMINI_API_KEY`, `DATA_GOV_API_KEY`, and SMTP credentials stay strictly server-side (`process.env`) behind proxy endpoints (`/api/chat*`, `/api/warehouses/gov`) and are never exposed to the browser bundle or committed source. |
 | Role-Based Access Control | `firestore.rules`, `src/utils/roles.ts` | Collection rules isolate PII (`users/{userId}`) to document owners and verified administrators, while routes enforce strict role checks (`isAdmin`, `support_staff`, `warehouse_owner`, `psychiatrist`, `farmer`). |
 | Session & Token Hygiene | `src/context/AuthContext.tsx` | Server HMAC session tokens are kept strictly in React memory (`useRef`) rather than `localStorage` or `sessionStorage` and cleared immediately on logout. |
 | Password Storage | `server.ts` | Server accounts use per-user 16-byte random salts with `crypto.scryptSync(..., 64)` and constant-time `crypto.timingSafeEqual` verification. |

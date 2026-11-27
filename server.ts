@@ -25,6 +25,10 @@ import {
   stripEmailHeaderInjection,
   verifyServerSessionToken,
 } from "./src/utils/serverSecurity.ts";
+import {
+  filterGovWarehouseRecords,
+  normalizeOgdWarehouseRecords,
+} from "./src/utils/govWarehouseDirectory.ts";
 
 dotenv.config();
 
@@ -135,6 +139,7 @@ async function startServer() {
   const app = express();
   const isProd = process.env.NODE_ENV === "production";
 
+  app.set("trust proxy", 1);
   app.disable("x-powered-by");
   app.use((_req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -663,6 +668,105 @@ async function startServer() {
     }
   });
 
+  app.get("/api/warehouses/gov", limitApi, async (req, res) => {
+    const stateFilter = String(req.query.state || "")
+      .trim()
+      .slice(0, 60);
+    const searchFilter = String(req.query.search || "")
+      .trim()
+      .slice(0, 60);
+    const queryResource =
+      typeof req.query.resourceId === "string" &&
+      /^[a-zA-Z0-9-]{8,64}$/.test(req.query.resourceId.trim())
+        ? req.query.resourceId.trim()
+        : "";
+
+    const apiKey = process.env.DATA_GOV_API_KEY?.trim() || "";
+    const resourceId =
+      queryResource ||
+      process.env.DATA_GOV_WAREHOUSE_RESOURCE_ID?.trim() ||
+      "";
+
+    if (!apiKey || apiKey === "MY_DATA_GOV_API_KEY") {
+      res.json({
+        ok: false,
+        configured: false,
+        source: "api.data.gov.in",
+        records: [],
+        notice:
+          "Official Open Government Data (data.gov.in) API key is not configured on the server. Add DATA_GOV_API_KEY and DATA_GOV_WAREHOUSE_RESOURCE_ID in Settings > Secrets.",
+      });
+      return;
+    }
+
+    if (!resourceId) {
+      res.json({
+        ok: false,
+        configured: true,
+        missingResourceId: true,
+        source: "api.data.gov.in",
+        records: [],
+        notice:
+          "Set DATA_GOV_WAREHOUSE_RESOURCE_ID in Settings > Secrets to your official WDRA warehouse or NHB cold storage dataset UUID on data.gov.in.",
+      });
+      return;
+    }
+
+    try {
+      const endpoint = new URL(
+        `https://api.data.gov.in/resource/${encodeURIComponent(resourceId)}`
+      );
+      endpoint.searchParams.set("api-key", apiKey);
+      endpoint.searchParams.set("format", "json");
+      endpoint.searchParams.set("limit", "60");
+
+      const govRes = await fetch(endpoint.toString(), {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!govRes.ok) {
+        res.json({
+          ok: false,
+          configured: true,
+          reachable: false,
+          source: "api.data.gov.in",
+          records: [],
+          notice: `Official data.gov.in endpoint returned status ${govRes.status}. Verify dataset resource UUID and key permissions.`,
+        });
+        return;
+      }
+
+      const payload = (await govRes.json()) as { records?: unknown[] };
+      const normalized = normalizeOgdWarehouseRecords(
+        Array.isArray(payload.records) ? payload.records : []
+      );
+      const filtered = filterGovWarehouseRecords(
+        normalized,
+        stateFilter,
+        searchFilter
+      );
+
+      res.json({
+        ok: true,
+        configured: true,
+        reachable: true,
+        source: "api.data.gov.in",
+        totalMatched: filtered.length,
+        records: filtered,
+      });
+    } catch {
+      res.json({
+        ok: false,
+        configured: true,
+        reachable: false,
+        source: "api.data.gov.in",
+        records: [],
+        notice:
+          "Unable to reach api.data.gov.in from this server right now. Showing verified BhoomiBandhu regional warehouses instead.",
+      });
+    }
+  });
+
   function resolveChatModelConfig(mode: ChatMode) {
     if (mode === "fast") {
       return {
@@ -682,6 +786,22 @@ async function startServer() {
     };
   }
 
+  function normalizeGeminiTurns(messages: Array<{ role: "user" | "model"; text: string }>) {
+    const merged: Array<{ role: "user" | "model"; text: string }> = [];
+    for (const msg of messages) {
+      const prev = merged[merged.length - 1];
+      if (prev && prev.role === msg.role) {
+        prev.text = `${prev.text}\n\n${msg.text}`.slice(0, 4000);
+      } else {
+        merged.push({ role: msg.role, text: msg.text });
+      }
+    }
+    while (merged.length > 0 && merged[0].role !== "user") {
+      merged.shift();
+    }
+    return merged;
+  }
+
   function sanitizeChatRequest(body: {
     messages?: IncomingMessage[];
     mode?: ChatMode;
@@ -695,7 +815,7 @@ async function startServer() {
         ? body.language.trim().slice(0, 40)
         : "English";
 
-    const sanitized = messages
+    const sanitizedRaw = messages
       .filter(
         (m) =>
           m &&
@@ -709,7 +829,71 @@ async function startServer() {
         text: m.text.trim().slice(0, 2000),
       }));
 
+    const sanitized = normalizeGeminiTurns(sanitizedRaw);
+
     return { sanitized, mode, requestedLanguage };
+  }
+
+  function formatGeminiErrorResponse(error: unknown): {
+    status: number;
+    userError: string;
+  } {
+    const rawMsg =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+        ? error
+        : "Unknown Gemini API error";
+    const upper = rawMsg.toUpperCase();
+    const numericStatus =
+      typeof (error as { status?: unknown })?.status === "number"
+        ? ((error as { status: number }).status)
+        : undefined;
+
+    if (
+      numericStatus === 403 ||
+      upper.includes("API_KEY_INVALID") ||
+      upper.includes("PERMISSION_DENIED") ||
+      upper.includes("403")
+    ) {
+      return {
+        status: 403,
+        userError:
+          "Gemini API key was rejected or lacks permission. Please verify GEMINI_API_KEY in Settings > Secrets.",
+      };
+    }
+
+    if (
+      numericStatus === 429 ||
+      upper.includes("RESOURCE_EXHAUSTED") ||
+      upper.includes("429")
+    ) {
+      return {
+        status: 429,
+        userError:
+          "AI quota limit reached temporarily. Please wait a moment or switch to Fast mode.",
+      };
+    }
+
+    if (numericStatus === 404 || upper.includes("NOT_FOUND")) {
+      return {
+        status: 502,
+        userError:
+          "The selected AI model is currently unavailable (404). Please try Fast or Balanced mode.",
+      };
+    }
+
+    if (numericStatus === 400 || upper.includes("INVALID_ARGUMENT")) {
+      return {
+        status: 400,
+        userError: `AI request configuration error: ${rawMsg.slice(0, 140)}`,
+      };
+    }
+
+    return {
+      status: 500,
+      userError: `Unable to get an AI response right now (${rawMsg.slice(0, 120)}).`,
+    };
   }
 
   app.post("/api/chat/stream", limitApi, async (req, res) => {
@@ -797,24 +981,11 @@ async function startServer() {
       );
       res.end();
     } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : "Failed to reach Gemini AI.";
       console.error("Gemini chat stream error:", error);
-
-      let userError = "Unable to get an AI response right now. Please try again.";
-      if (message.includes("403") || message.includes("API_KEY_INVALID")) {
-        userError =
-          "Gemini API key was rejected. Please verify GEMINI_API_KEY in Settings > Secrets.";
-      } else if (
-        message.includes("429") ||
-        message.includes("RESOURCE_EXHAUSTED")
-      ) {
-        userError =
-          "AI quota limit reached temporarily. Please wait a moment or try Fast mode.";
-      }
+      const { status, userError } = formatGeminiErrorResponse(error);
 
       if (!res.headersSent) {
-        res.status(500).json({ error: userError });
+        res.status(status).json({ error: userError });
       } else {
         res.write(`data: ${JSON.stringify({ error: userError })}\n\n`);
         res.end();
@@ -889,29 +1060,9 @@ async function startServer() {
         mode,
       });
     } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : "Failed to reach Gemini AI.";
       console.error("Gemini chat error:", error);
-
-      if (message.includes("403") || message.includes("API_KEY_INVALID")) {
-        res.status(403).json({
-          error:
-            "Gemini API key was rejected. Please verify GEMINI_API_KEY in Settings > Secrets.",
-        });
-        return;
-      }
-
-      if (message.includes("429") || message.includes("RESOURCE_EXHAUSTED")) {
-        res.status(429).json({
-          error:
-            "AI quota limit reached temporarily. Please wait a moment or try Fast mode.",
-        });
-        return;
-      }
-
-      res.status(500).json({
-        error: "Unable to get an AI response right now. Please try again.",
-      });
+      const { status, userError } = formatGeminiErrorResponse(error);
+      res.status(status).json({ error: userError });
     }
   });
 

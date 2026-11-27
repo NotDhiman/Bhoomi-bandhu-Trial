@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Check,
+  Database,
   List,
   MapPin,
   Plus,
+  RefreshCw,
   Search,
   Star,
   Warehouse,
@@ -13,6 +15,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { INDIAN_STATES } from "../data/bhoomiData";
 import { filterWarehousesForRegion } from "../utils/warehouseFilter";
+import type { GovWarehouseRecord } from "../utils/govWarehouseDirectory";
 
 export function WarehousesPage() {
   const {
@@ -60,6 +63,53 @@ export function WarehousesPage() {
   const [whDesc, setWhDesc] = useState("");
   const [whSaving, setWhSaving] = useState(false);
   const [whError, setWhError] = useState("");
+
+  // Official Open Government Data (data.gov.in) regional warehouse & cold storage lookup
+  const [govLoading, setGovLoading] = useState(false);
+  const [govRecords, setGovRecords] = useState<GovWarehouseRecord[]>([]);
+  const [govNotice, setGovNotice] = useState("");
+  const [govChecked, setGovChecked] = useState(false);
+
+  const loadGovDirectory = async () => {
+    setGovLoading(true);
+    setGovNotice("");
+    try {
+      const params = new URLSearchParams();
+      if (regionFilter && regionFilter !== "All India") {
+        params.set("state", regionFilter);
+      }
+      if (searchQuery.trim()) {
+        params.set("search", searchQuery.trim());
+      }
+      const res = await fetch(`/api/warehouses/gov?${params.toString()}`);
+      const data = (await res.json()) as {
+        ok?: boolean;
+        records?: GovWarehouseRecord[];
+        notice?: string;
+      };
+      setGovChecked(true);
+      if (data.ok && Array.isArray(data.records)) {
+        setGovRecords(data.records);
+        if (data.records.length === 0) {
+          setGovNotice(
+            `No official data.gov.in warehouse or cold storage entries matched ${regionFilter}.`
+          );
+        }
+      } else {
+        setGovRecords([]);
+        setGovNotice(
+          data.notice ||
+            "Official data.gov.in registry is currently unavailable."
+        );
+      }
+    } catch {
+      setGovChecked(true);
+      setGovRecords([]);
+      setGovNotice("Could not reach the government directory service right now.");
+    } finally {
+      setGovLoading(false);
+    }
+  };
 
   const filteredWarehouses = useMemo(
     () =>
@@ -606,6 +656,88 @@ export function WarehousesPage() {
               )}
             </div>
           )}
+
+          {/* Official Government Data (data.gov.in) Regional Warehouse & Cold Storage Registry */}
+          <section
+            aria-labelledby="gov-warehouse-heading"
+            className="bg-white rounded-2xl border border-[#2D6A4F]/15 p-5 md:p-6 space-y-4"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#EAF4EE] text-[#2D6A4F] flex items-center justify-center shrink-0">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2
+                    id="gov-warehouse-heading"
+                    className="font-display font-semibold text-base md:text-lg text-[#1B2A20]"
+                  >
+                    Official Gov. Warehouse &amp; Cold Storage Directory (data.gov.in)
+                  </h2>
+                  <p className="text-xs text-[#4A5A4F]">
+                    Query Open Government Data (OGD India) WDRA / Cold Storage
+                    locations filtered for{" "}
+                    <strong className="text-[#1B2A20]">{regionFilter}</strong>.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={loadGovDirectory}
+                disabled={govLoading}
+                className="min-h-[40px] px-4 rounded-xl bg-[#2D6A4F] hover:bg-[#23543E] disabled:opacity-60 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 self-start sm:self-auto shrink-0 transition-colors"
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${govLoading ? "animate-spin" : ""}`}
+                />
+                <span>
+                  {govLoading
+                    ? "Checking data.gov.in..."
+                    : govChecked
+                    ? "Refresh Gov. Registry"
+                    : "Load Official Gov. Directory"}
+                </span>
+              </button>
+            </div>
+
+            {govNotice && (
+              <div className="p-3.5 rounded-xl bg-[#FAF8F3] border border-[#2D6A4F]/15 text-xs text-[#4A5A4F]">
+                {govNotice}
+              </div>
+            )}
+
+            {govRecords.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {govRecords.map((rec) => (
+                  <div
+                    key={rec.id}
+                    className="p-4 rounded-xl bg-[#FAF8F3] border border-[#2D6A4F]/15 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold uppercase text-[#2D6A4F]">
+                        {rec.facilityType} · {rec.operatorType}
+                      </span>
+                      {rec.registrationId && (
+                        <span className="text-[11px] font-mono text-[#4A5A4F]">
+                          {rec.registrationId}
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="font-display font-semibold text-sm text-[#1B2A20]">
+                      {rec.name}
+                    </h3>
+                    <p className="text-xs text-[#4A5A4F]">{rec.address}</p>
+                    {rec.capacityMt !== null && (
+                      <p className="text-xs font-semibold text-[#1B2A20] tabular-nums">
+                        Registered Capacity: {rec.capacityMt.toLocaleString("en-IN")} MT
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </>
       )}
     </div>
